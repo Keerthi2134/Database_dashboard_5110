@@ -1,0 +1,54 @@
+=== PAGE 1 ===
+Analytical Dashboard: OLAP Demonstration Prompts
+Presentation–Time OLAP Narratives
+E1. GC leaderboard with contextual descent.Begin from the overall General Classifica-
+tion, ordered by the lowest cumulative∑adjusted_time. Follow a chosen contender down
+to the stage grain to surface the single day that most altered their GC standing, framing
+it as a pivotal moment in their race.
+E2. A stage in focus.Treat one stage as a vignette: present the leading finishers with their
+adjusted times, riders, teams, origins and destinations, distance, and stage type. Reframe
+the view to a team perspective to reveal which squads populated the top ten on that day.
+E3. Team burden and contribution.Roll up each team’s aggregate adjusted time over the
+event, then open the aggregation to reveal which riders carried the time load and how their
+per-stage profiles shaped the team’s outcome.
+E4. Parallel classifications.Place side-by-side a rider’s GC rank and their Young Rider GC
+rank (with an age filter anchored at race start). Introduce amountain-stage GC proxy
+by accumulating adjusted time only on “Mountain” stages, and narrate where the proxy
+diverges from overall GC.
+E5. Mountain contours.For riders, surface two mountain-specific signals: podium frequency
+on Mountain stages and mean time gap to the stage winner on that terrain; allow a return
+to the daily traces that produced these summaries.
+E6. Speed as a simple ratio.For riders and teams, chart a stage-type profile using the
+proxy length/time across Flat, Hilly, Mountain, and ITT. Emphasize who appears to gain
+when the terrain shifts away from Flat/Hilly toward Mountain.
+E7. Bonuses, penalties, and counterfactuals.Lay out cumulative bonuses and penalties
+per rider; then replay the GC leaderboard under counterfactual toggles (first removing
+bonuses, then penalties) to illuminate movements into and out of the top ten.
+E8. Participation by nation.Summarize nations by their presence—count of teams and
+count of riders—then open the roll-up to list the riders and their associated teams for a
+chosen country.
+E9. National outcomes (within available data).For each nation, note the best GC rank
+achieved by its riders and tally wins/podiums; keep the pathway back to the underlying
+stages and athletes clear.
+E10. Temporal GC storyline.Trace cumulative adjusted time after each stage for the prin-
+cipal GC actors as a line narrative; mark Mountain stages and annotate inflection points
+where standings reshuffle, with rider/team filters guiding the lens.
+E11. Against the clock.Within the time-trial context, surface the inventory of ITT stages
+and present their essentials—date, distance, and winner—as a compact catalogue.
+1
+
+=== PAGE 2 ===
+E12. Consistency near the front.From the space of high finishes, identify the riders who
+most often appear in the top ten; accompany the summary with the list of contributing
+stages, their ranks, and stage types.
+E13. Depth of squads.At the rider grain, portray team depth via distinct rider counts,
+highlighting squads with the broadest rosters and providing a doorway to their full rider
+lists and countries.
+E14. Top-ten intensity by team.Aggregate top-ten presences at the team level and, where
+helpful, break them down by stage type; pair the totals with links back to the specific
+stages and riders involved.
+E15. Thelongday.Sortstagesbydistancetospotlightthelongestroute, giving itsname/date,
+type, and start/finish locations; complement the overview with the set of leading finishers
+and their adjusted times.
+2
+
