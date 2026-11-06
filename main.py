@@ -937,7 +937,10 @@ elif menu == "🏔️ Stages & Terrain (E2, E5, E6, E11, E15)":
         </div>
         """, unsafe_allow_html=True)
 
-        finishers_df = olap.get_stage_finishers(selected_stage, top_n=10)
+        finishers_df = olap.get_stage_finishers(selected_stage, top_n=10).copy()
+        finishers_df["podium_cat"] = finishers_df["rank"].apply(
+            lambda r: "Winner (1st)" if r == 1 else ("Podium (2nd-3rd)" if r <= 3 else "Top 10 (4th-10th)")
+        )
         team_persp = olap.get_stage_team_perspective(selected_stage, top_n=10)
 
         # Side-by-side: Primary Lollipop Chart + Secondary Team Presence Chart
@@ -954,11 +957,10 @@ elif menu == "🏔️ Stages & Terrain (E2, E5, E6, E11, E15)":
             dot_e2 = alt.Chart(finishers_df).mark_circle(size=140).encode(
                 y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending")),
                 x=alt.X("gap:Q"),
-                color=alt.condition(
-                    alt.datum.rank == 1,
-                    alt.value("#eab308"), # Gold for winner
-                    alt.condition(alt.datum.rank <= 3, alt.value("#2563eb"), alt.value("#64748b"))
-                ),
+                color=alt.Color("podium_cat:N", scale=alt.Scale(
+                    domain=["Winner (1st)", "Podium (2nd-3rd)", "Top 10 (4th-10th)"],
+                    range=["#eab308", "#2563eb", "#64748b"]
+                ), title="Finish Position", legend=None),
                 tooltip=[
                     alt.Tooltip("rank:Q", title="Finish Rank"),
                     alt.Tooltip("rider_name:N", title="Rider"),
@@ -1467,18 +1469,25 @@ elif menu == "👥 Teams & Squads (E3, E13, E14)":
             with col_e3_2:
                 sel_team_e3 = st.selectbox("Select Squad to Deep Dive:", options=team_sum["team_name"].tolist(), index=0)
 
-            team_riders_e3 = olap.get_team_rider_contributions(sel_team_e3)
+            team_riders_e3 = olap.get_team_rider_contributions(sel_team_e3).copy()
+            def get_rider_status_cat(r):
+                if r["is_leader"] == 1:
+                    return "Leader"
+                elif "Completed" in str(r["status"]):
+                    return "Completed"
+                else:
+                    return "Exited"
+            team_riders_e3["status_cat"] = team_riders_e3.apply(get_rider_status_cat, axis=1)
 
             # Single squad breakdown chart
             st.markdown(f"#### 🚴 Rider Time Burden Distribution: {sel_team_e3}")
             single_e3_bar = alt.Chart(team_riders_e3).mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4).encode(
                 y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="pct_team_burden", order="descending"), title="Rider"),
                 x=alt.X("pct_team_burden:Q", title="Share of Squad Aggregate Time (%)"),
-                color=alt.condition(
-                    alt.datum.is_leader == 1,
-                    alt.value("#eab308"), # Leader Gold
-                    alt.condition(alt.datum.status == "Completed", alt.value("#2563eb"), alt.value("#ef4444"))
-                ),
+                color=alt.Color("status_cat:N", scale=alt.Scale(
+                    domain=["Leader", "Completed", "Exited"],
+                    range=["#eab308", "#2563eb", "#ef4444"]
+                ), title="Status", legend=None),
                 tooltip=[
                     alt.Tooltip("rider_name:N", title="Rider"),
                     alt.Tooltip("role:N", title="Role"),
