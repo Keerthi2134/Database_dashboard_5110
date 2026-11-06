@@ -313,6 +313,37 @@ def get_team_rider_contributions(team_name: str) -> pd.DataFrame:
         df["time_formatted"] = df["rider_total_adj_time"].apply(format_seconds)
     return df
 
+def get_all_teams_rider_contributions() -> pd.DataFrame:
+    """Rider burden breakdown across all teams for 100% stacked contribution analysis."""
+    q = """
+    WITH team_totals AS (
+        SELECT rd.team_name, SUM(r.adj_time) AS team_total_time
+        FROM result_with_adj_time r
+        JOIN rider rd ON r.bib_number = rd.bib_number
+        GROUP BY rd.team_name
+    )
+    SELECT 
+        rd.team_name,
+        rd.bib_number,
+        rd.rider_name,
+        rd.role,
+        rd.is_leader,
+        COUNT(r.stage_id) AS stages_completed,
+        SUM(r.adj_time) AS rider_total_adj_time,
+        ROUND(SUM(r.adj_time) * 100.0 / tt.team_total_time, 2) AS pct_team_burden,
+        CASE WHEN e.bib_number IS NOT NULL THEN 'Exited' ELSE 'Completed' END AS status
+    FROM rider rd
+    JOIN result_with_adj_time r ON rd.bib_number = r.bib_number
+    JOIN team_totals tt ON rd.team_name = tt.team_name
+    LEFT JOIN exit e ON rd.bib_number = e.bib_number
+    GROUP BY rd.bib_number
+    ORDER BY rd.team_name ASC, rider_total_adj_time DESC;
+    """
+    df = execute_query(q)
+    if not df.empty:
+        df["time_formatted"] = df["rider_total_adj_time"].apply(format_seconds)
+    return df
+
 # ==============================================================================
 # E4. PARALLEL CLASSIFICATIONS
 # ==============================================================================
@@ -594,7 +625,7 @@ def get_nation_riders(country_code: str) -> pd.DataFrame:
 # ==============================================================================
 
 def get_national_outcomes() -> pd.DataFrame:
-    """Best GC rank, stage wins, and podiums for each nation."""
+    """Best GC rank, stage wins, and podiums for each nation, plus national peloton participation."""
     q = """
     WITH finisher_counts AS (
         SELECT bib_number, COUNT(stage_id) AS cnt
@@ -626,10 +657,16 @@ def get_national_outcomes() -> pd.DataFrame:
         FROM result_with_adj_time r
         JOIN rider rd ON r.bib_number = rd.bib_number
         GROUP BY rd.country_code
+    ),
+    rider_counts AS (
+        SELECT country_code, COUNT(bib_number) AS rider_count
+        FROM rider
+        GROUP BY country_code
     )
     SELECT 
         c.country_code,
         c.country_name,
+        COALESCE(rc.rider_count, 0) AS rider_count,
         COALESCE(nb.best_gc_rank, 999) AS best_gc_rank,
         COALESCE(swp.stage_wins, 0) AS stage_wins,
         COALESCE(swp.stage_podiums, 0) AS stage_podiums,
@@ -637,7 +674,8 @@ def get_national_outcomes() -> pd.DataFrame:
     FROM country c
     JOIN (
         SELECT DISTINCT country_code FROM rider
-    ) rc ON c.country_code = rc.country_code
+    ) r_exist ON c.country_code = r_exist.country_code
+    LEFT JOIN rider_counts rc ON c.country_code = rc.country_code
     LEFT JOIN nation_best_gc nb ON c.country_code = nb.country_code
     LEFT JOIN stage_wins_podiums swp ON c.country_code = swp.country_code
     ORDER BY stage_wins DESC, stage_podiums DESC, best_gc_rank ASC;
@@ -772,6 +810,44 @@ def get_rider_contributing_stages(bib_number: int) -> pd.DataFrame:
     if not df.empty:
         df["adj_time_formatted"] = df["adj_time"].apply(format_seconds)
     return df
+
+def get_top10_consistency_matrix(top_n_riders: int = 15) -> pd.DataFrame:
+    """Rider x Stage matrix for consistent top-10 contenders across all 21 stages."""
+    q = """
+    WITH consistent_riders AS (
+        SELECT 
+            r.bib_number,
+            rd.rider_name,
+            rd.team_name,
+            COUNT(r.stage_id) AS top10_count
+        FROM result_with_adj_time r
+        JOIN rider rd ON r.bib_number = rd.bib_number
+        WHERE r.rank <= 10
+        GROUP BY r.bib_number
+        ORDER BY top10_count DESC
+        LIMIT ?
+    )
+    SELECT 
+        cr.bib_number,
+        cr.rider_name,
+        cr.team_name,
+        cr.top10_count,
+        s.stage_id,
+        s.stage_type,
+        r.rank AS stage_rank,
+        CASE 
+            WHEN r.rank = 1 THEN '1st (Win)'
+            WHEN r.rank <= 3 THEN '2nd-3rd (Podium)'
+            WHEN r.rank <= 10 THEN '4th-10th (Top 10)'
+            WHEN r.rank IS NOT NULL THEN '> 10th'
+            ELSE 'DNS/DNF'
+        END AS finish_category
+    FROM consistent_riders cr
+    CROSS JOIN stage s
+    LEFT JOIN result_with_adj_time r ON cr.bib_number = r.bib_number AND s.stage_id = r.stage_id
+    ORDER BY cr.top10_count DESC, cr.rider_name ASC, s.stage_id ASC;
+    """
+    return execute_query(q, (top_n_riders,))
 
 # ==============================================================================
 # E13. DEPTH OF SQUADS

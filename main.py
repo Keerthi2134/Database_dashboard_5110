@@ -335,47 +335,81 @@ elif menu == "🏆 GC & Storylines (E1, E4, E7, E10)":
     ])
 
     # -------------------------------------------------------------------------
-    # TAB 1: E1
+    # TAB 1: E1 (Category A: Chart-First)
     # -------------------------------------------------------------------------
     with tab1:
         st.subheader("E1. General Classification Leaderboard with Contextual Descent")
         st.markdown("""
-        Begin from the overall General Classification, ordered by lowest cumulative $\sum \\text{adjusted\_time}$. 
-        Select any contender to follow their trajectory down to the stage grain, surfacing the **single pivotal day** that most altered their race.
+        Compare GC contenders by cumulative adjusted time gap to the leader, then select any contender 
+        to trace their stage-grain trajectory and isolate the **single pivotal day** that reshaped their Tour.
         """)
 
         gc_df = olap.get_gc_leaderboard(21)
-        
-        # Leaderboard Top Table
+
+        # Interactive Controls
         col_ctrl1, col_ctrl2 = st.columns([2, 1])
         with col_ctrl1:
             team_filter = st.multiselect("Filter by Team:", options=sorted(gc_df["team_name"].unique()), default=[])
         with col_ctrl2:
-            top_n = st.slider("Display Top N Riders:", min_value=5, max_value=160, value=15, step=5)
+            top_n = st.slider("Display Top N Riders:", min_value=5, max_value=50, value=15, step=5)
 
         filtered_gc = gc_df.copy()
         if team_filter:
             filtered_gc = filtered_gc[filtered_gc["team_name"].isin(team_filter)]
 
-        st.dataframe(
-            filtered_gc.head(top_n)[[
-                "gc_rank", "bib_number", "rider_name", "team_name", "country_code", 
-                "time_formatted", "gap_formatted", "total_bonus", "total_penalty"
-            ]],
-            column_config={
-                "gc_rank": st.column_config.NumberColumn("GC Rank", format="%d"),
-                "bib_number": st.column_config.NumberColumn("Bib", format="%d"),
-                "rider_name": "Rider",
-                "team_name": "Team",
-                "country_code": "Nat",
-                "time_formatted": "Cumulative Time",
-                "gap_formatted": "Gap to Leader",
-                "total_bonus": st.column_config.NumberColumn("Bonus (s)", format="-%ds"),
-                "total_penalty": st.column_config.NumberColumn("Penalty (s)", format="+%ds")
-            },
-            hide_index=True,
-            use_container_width=True
+        chart_gc = filtered_gc.head(top_n).copy()
+
+        # Primary Visualization 1: Horizontal Gap-to-Leader Bar Chart
+        st.markdown("#### 📊 General Classification: Time Gap to Leader")
+        gap_bar = alt.Chart(chart_gc).mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4).encode(
+            y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="gc_rank", order="ascending"), title="Contender (by GC Rank)"),
+            x=alt.X("gap_to_leader:Q", title="Time Gap to GC Leader (Seconds)"),
+            color=alt.condition(
+                alt.datum.gap_to_leader == 0,
+                alt.value("#eab308"),  # Yellow Jersey Leader
+                alt.value("#2563eb")   # Blue Contenders
+            ),
+            tooltip=[
+                alt.Tooltip("gc_rank:Q", title="GC Rank"),
+                alt.Tooltip("rider_name:N", title="Rider"),
+                alt.Tooltip("team_name:N", title="Team"),
+                alt.Tooltip("country_code:N", title="Nat"),
+                alt.Tooltip("time_formatted:N", title="Cumulative Time"),
+                alt.Tooltip("gap_formatted:N", title="Gap to Leader"),
+                alt.Tooltip("total_bonus:Q", title="Total Bonus (s)"),
+                alt.Tooltip("total_penalty:Q", title="Total Penalty (s)")
+            ]
+        ).properties(height=max(260, len(chart_gc) * 22))
+
+        gap_labels = alt.Chart(chart_gc).mark_text(
+            align="left", baseline="middle", dx=6, fontSize=11, color="#334155"
+        ).encode(
+            y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="gc_rank", order="ascending")),
+            x=alt.X("gap_to_leader:Q"),
+            text=alt.Text("gap_formatted:N")
         )
+        st.altair_chart(gap_bar + gap_labels, use_container_width=True)
+
+        with st.expander("📋 View Full General Classification Leaderboard Table"):
+            st.dataframe(
+                filtered_gc.head(top_n)[[
+                    "gc_rank", "bib_number", "rider_name", "team_name", "country_code", 
+                    "time_formatted", "gap_formatted", "total_bonus", "total_penalty"
+                ]],
+                column_config={
+                    "gc_rank": st.column_config.NumberColumn("GC Rank", format="%d"),
+                    "bib_number": st.column_config.NumberColumn("Bib", format="%d"),
+                    "rider_name": "Rider",
+                    "team_name": "Team",
+                    "country_code": "Nat",
+                    "time_formatted": "Cumulative Time",
+                    "gap_formatted": "Gap to Leader",
+                    "total_bonus": st.column_config.NumberColumn("Bonus (s)", format="-%ds"),
+                    "total_penalty": st.column_config.NumberColumn("Penalty (s)", format="+%ds")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
 
         st.markdown("---")
         st.markdown("### 🔍 Contextual Descent: Stage Grain Drilldown")
@@ -385,7 +419,7 @@ elif menu == "🏆 GC & Storylines (E1, E4, E7, E10)":
         selected_label = st.selectbox("Choose a contender to inspect:", options=list(rider_options.keys()), index=0)
         selected_bib = rider_options[selected_label]
 
-        # Stage Descent Data
+        # Stage Descent Data & Pivotal Moment
         descent_df = olap.get_rider_stage_descent(selected_bib)
         pivotal = olap.get_pivotal_moment(descent_df)
 
@@ -400,56 +434,73 @@ elif menu == "🏆 GC & Storylines (E1, E4, E7, E10)":
             </div>
             """, unsafe_allow_html=True)
 
-        # Stage Progression Chart
-        rank_chart = alt.Chart(descent_df).mark_line(point=True, color="#2563eb", strokeWidth=3).encode(
-            x=alt.X("stage_id:O", title="Stage Number"),
+        # Primary Visualization 2: GC Rank Evolution Line Chart across 21 Stages
+        st.markdown("#### 📈 Stage-by-Stage GC Rank Evolution")
+        base_line = alt.Chart(descent_df).mark_line(point=True, color="#2563eb", strokeWidth=3).encode(
+            x=alt.X("stage_id:O", title="Stage Number (1–21)"),
             y=alt.Y("gc_rank_stage:Q", title="Progressive GC Rank (Inverted)", scale=alt.Scale(reverse=True, zero=False)),
             tooltip=[
                 alt.Tooltip("stage_id:O", title="Stage"),
                 alt.Tooltip("stage_type:N", title="Terrain"),
+                alt.Tooltip("distance_km:Q", title="Distance (km)"),
                 alt.Tooltip("stage_rank:Q", title="Daily Finish"),
-                alt.Tooltip("gc_rank_stage:Q", title="GC Rank"),
-                alt.Tooltip("gap_formatted:N", title="Gap to Leader")
+                alt.Tooltip("gc_rank_stage:Q", title="GC Rank After Stage"),
+                alt.Tooltip("gap_formatted:N", title="Gap to Leader"),
+                alt.Tooltip("rank_change:Q", title="Δ Rank"),
+                alt.Tooltip("gap_change_formatted:N", title="Δ Gap")
             ]
-        ).properties(
-            title=f"GC Rank Evolution across 21 Stages - {selected_label}",
-            height=280
         )
-        st.altair_chart(rank_chart, use_container_width=True)
 
-        # Detailed Daily Descent Table
-        st.markdown("#### Full Daily Stage Breakdown")
-        st.dataframe(
-            descent_df[[
-                "stage_id", "stage_date", "stage_type", "distance_km", "start_location", "finish_location",
-                "stage_rank", "adj_time_formatted", "gap_formatted", "gc_rank_stage", "rank_change", "gap_change_formatted"
-            ]],
-            column_config={
-                "stage_id": st.column_config.NumberColumn("Stage", format="%d"),
-                "stage_date": "Date",
-                "stage_type": "Terrain",
-                "distance_km": st.column_config.NumberColumn("Km", format="%.1f"),
-                "start_location": "Start",
-                "finish_location": "Finish",
-                "stage_rank": st.column_config.NumberColumn("Stage Rank", format="%d"),
-                "adj_time_formatted": "Adjusted Time",
-                "gap_formatted": "Gap to Leader",
-                "gc_rank_stage": st.column_config.NumberColumn("GC Rank After Stage", format="%d"),
-                "rank_change": st.column_config.NumberColumn("Δ Rank", format="%+d"),
-                "gap_change_formatted": "Δ Gap"
-            },
-            hide_index=True,
-            use_container_width=True
-        )
+        if pivotal:
+            piv_pt = alt.Chart(descent_df[descent_df["stage_id"] == pivotal["stage_id"]]).mark_point(
+                size=220, color="#f59e0b", filled=True, shape="diamond"
+            ).encode(
+                x="stage_id:O",
+                y="gc_rank_stage:Q",
+                tooltip=[
+                    alt.Tooltip("stage_id:O", title="Pivotal Stage"),
+                    alt.Tooltip("stage_type:N", title="Terrain"),
+                    alt.Tooltip("gap_change_formatted:N", title="Gap Swing")
+                ]
+            )
+            stage_chart = (base_line + piv_pt).properties(title=f"GC Rank Trajectory - {selected_label} (Diamond = Pivotal Stage)", height=300)
+        else:
+            stage_chart = base_line.properties(title=f"GC Rank Trajectory - {selected_label}", height=300)
+
+        st.altair_chart(stage_chart, use_container_width=True)
+
+        with st.expander("📊 View Complete 21-Stage Daily Descent Table"):
+            st.dataframe(
+                descent_df[[
+                    "stage_id", "stage_date", "stage_type", "distance_km", "start_location", "finish_location",
+                    "stage_rank", "adj_time_formatted", "gap_formatted", "gc_rank_stage", "rank_change", "gap_change_formatted"
+                ]],
+                column_config={
+                    "stage_id": st.column_config.NumberColumn("Stage", format="%d"),
+                    "stage_date": "Date",
+                    "stage_type": "Terrain",
+                    "distance_km": st.column_config.NumberColumn("Km", format="%.1f"),
+                    "start_location": "Start",
+                    "finish_location": "Finish",
+                    "stage_rank": st.column_config.NumberColumn("Stage Rank", format="%d"),
+                    "adj_time_formatted": "Adjusted Time",
+                    "gap_formatted": "Gap to Leader",
+                    "gc_rank_stage": st.column_config.NumberColumn("GC Rank After Stage", format="%d"),
+                    "rank_change": st.column_config.NumberColumn("Δ Rank", format="%+d"),
+                    "gap_change_formatted": "Δ Gap"
+                },
+                hide_index=True,
+                use_container_width=True
+            )
 
     # -------------------------------------------------------------------------
-    # TAB 2: E4
+    # TAB 2: E4 (Category A: Chart-First)
     # -------------------------------------------------------------------------
     with tab2:
         st.subheader("E4. Parallel Classifications & Mountain-Stage Proxy")
         st.markdown("""
-        Place side-by-side a rider's **overall GC rank** and their **Young Rider GC rank** (filtered at race start for riders born $\ge$ 2000-01-01).
-        Introduce a **Mountain-Stage GC Proxy** (accumulating adjusted time only on Mountain stages) and surface key divergences.
+        Compare side-by-side **Overall GC Rank**, **Young Rider GC Rank** (riders born $\ge$ 2000-01-01), 
+        and **Mountain-Stage GC Proxy** (accumulating adjusted time only across the 6 high-mountain stages).
         """)
 
         parallel_df = olap.get_parallel_classifications()
@@ -461,164 +512,391 @@ elif menu == "🏆 GC & Storylines (E1, E4, E7, E10)":
         with pk2:
             st.metric("Young Rider Contenders", len(parallel_df.dropna(subset=["young_rank"])))
         with pk3:
-            st.metric("Mountain Stages Included", "6 High Mountain Stages")
+            st.metric("Mountain Stages Proxy Grain", "6 High Mountain Stages")
 
-        st.markdown("#### Parallel Standings Table")
-        st.dataframe(
-            parallel_df[[
-                "gc_rank", "young_rank", "mtn_proxy_rank", "mtn_gc_divergence", 
-                "bib_number", "rider_name", "team_name", "dob", "total_time_formatted"
-            ]],
-            column_config={
-                "gc_rank": st.column_config.NumberColumn("Overall GC Rank", format="%d"),
-                "young_rank": st.column_config.NumberColumn("Young Rider Rank", format="%d"),
-                "mtn_proxy_rank": st.column_config.NumberColumn("Mountain Proxy Rank", format="%d"),
-                "mtn_gc_divergence": st.column_config.NumberColumn("Divergence (GC - Mountain)", format="%+d"),
-                "bib_number": "Bib",
-                "rider_name": "Rider",
-                "team_name": "Team",
-                "dob": "Date of Birth",
-                "total_time_formatted": "Total GC Time"
-            },
-            hide_index=True,
-            use_container_width=True
+        col_p1, col_p2 = st.columns([2, 1])
+        with col_p1:
+            p_mode = st.radio(
+                "Classification Focus:",
+                ["Top Overall GC Contenders", "Young Rider Class (≤ 25 yrs)", "Highest Mountain-GC Divergence"],
+                horizontal=True
+            )
+        with col_p2:
+            p_top_n = st.slider("Display Riders:", min_value=10, max_value=35, value=15, step=5)
+
+        # Prepare filtered subset for Dumbbell Plot
+        sub_parallel = parallel_df.copy()
+        if p_mode == "Young Rider Class (≤ 25 yrs)":
+            sub_parallel = sub_parallel.dropna(subset=["young_rank"]).sort_values("young_rank").head(p_top_n)
+        elif p_mode == "Highest Mountain-GC Divergence":
+            sub_parallel["abs_div"] = sub_parallel["mtn_gc_divergence"].abs()
+            sub_parallel = sub_parallel.sort_values("abs_div", ascending=False).head(p_top_n)
+        else:
+            sub_parallel = sub_parallel.sort_values("gc_rank").head(p_top_n)
+
+        sub_parallel["min_rank"] = sub_parallel[["gc_rank", "mtn_proxy_rank"]].min(axis=1)
+        sub_parallel["max_rank"] = sub_parallel[["gc_rank", "mtn_proxy_rank"]].max(axis=1)
+
+        # Primary Visualization: Dumbbell / Connected Dot Plot
+        st.markdown("#### 🏋️ Connected Dot Plot: Overall GC vs. Mountain Proxy vs. Young Rider")
+        st.caption("Lines connect Overall GC Rank to Mountain Proxy Rank; dot spread visualizes terrain performance divergence.")
+
+        rule_p = alt.Chart(sub_parallel).mark_rule(color="#94a3b8", strokeWidth=2).encode(
+            y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="gc_rank", order="ascending"), title="Rider"),
+            x=alt.X("min_rank:Q", title="Classification Rank (1 = Best)"),
+            x2="max_rank:Q"
         )
 
-        st.markdown("---")
-        st.markdown("#### ⛰️ Mountain Proxy Divergence Analysis")
+        pts_gc = alt.Chart(sub_parallel).mark_circle(size=140, color="#eab308").encode(
+            y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="gc_rank", order="ascending")),
+            x=alt.X("gc_rank:Q"),
+            tooltip=[
+                alt.Tooltip("rider_name:N", title="Rider"),
+                alt.Tooltip("team_name:N", title="Team"),
+                alt.Tooltip("gc_rank:Q", title="Overall GC Rank"),
+                alt.Tooltip("mtn_proxy_rank:Q", title="Mountain Proxy Rank"),
+                alt.Tooltip("mtn_gc_divergence:Q", title="Divergence (GC - Mtn)"),
+                alt.Tooltip("total_time_formatted:N", title="Total GC Time")
+            ]
+        )
+
+        pts_mtn = alt.Chart(sub_parallel).mark_circle(size=140, color="#ef4444").encode(
+            y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="gc_rank", order="ascending")),
+            x=alt.X("mtn_proxy_rank:Q"),
+            tooltip=[
+                alt.Tooltip("rider_name:N", title="Rider"),
+                alt.Tooltip("team_name:N", title="Team"),
+                alt.Tooltip("gc_rank:Q", title="Overall GC Rank"),
+                alt.Tooltip("mtn_proxy_rank:Q", title="Mountain Proxy Rank"),
+                alt.Tooltip("mtn_gc_divergence:Q", title="Divergence (GC - Mtn)")
+            ]
+        )
+
+        # Young rider points
+        pts_young = alt.Chart(sub_parallel.dropna(subset=["young_rank"])).mark_point(
+            size=120, shape="diamond", color="#6366f1", filled=True
+        ).encode(
+            y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="gc_rank", order="ascending")),
+            x=alt.X("young_rank:Q"),
+            tooltip=[
+                alt.Tooltip("rider_name:N", title="Rider"),
+                alt.Tooltip("young_rank:Q", title="Young Rider Rank")
+            ]
+        )
+
+        dumbbell_chart = (rule_p + pts_gc + pts_mtn + pts_young).properties(height=max(320, len(sub_parallel) * 24))
+        st.altair_chart(dumbbell_chart, use_container_width=True)
+
         st.markdown("""
-        **Positive Divergence (+):** Rider excels in mountains (e.g. pure climber whose mountain rank is higher than overall GC due to losses on flat/ITT stages).  
-        **Negative Divergence (−):** Rider excels on flat/ITT terrains but loses time in the high mountains.
-        """)
+        <div style="display: flex; gap: 24px; font-size: 0.85rem; color: #334155; margin-top: -8px; margin-bottom: 14px;">
+            <span>🟡 <strong>Overall GC Rank</strong></span>
+            <span>🔴 <strong>Mountain Proxy Rank</strong></span>
+            <span>🔷 <strong>Young Rider Rank (≤ 25 yrs)</strong></span>
+            <span>— <strong>Divergence Spread</strong></span>
+        </div>
+        """, unsafe_allow_html=True)
 
-        # Scatter Chart of GC Rank vs Mountain Proxy Rank
-        scatter_chart = alt.Chart(parallel_df).mark_circle(size=80).encode(
-            x=alt.X("gc_rank:Q", title="Overall GC Rank"),
-            y=alt.Y("mtn_proxy_rank:Q", title="Mountain Proxy Rank"),
-            color=alt.Color("mtn_gc_divergence:Q", scale=alt.Scale(scheme="redblue", domainMid=0), title="Divergence"),
-            tooltip=["rider_name", "team_name", "gc_rank", "mtn_proxy_rank", "mtn_gc_divergence"]
-        ).properties(
-            title="Overall GC Rank vs. Mountain-Stage Proxy Rank (Diagonal = Perfect Parity)",
-            height=380
-        )
+        with st.expander("⛰️ Mountain Proxy Divergence Analysis & Scatter Plot"):
+            st.markdown("""
+            **Positive Divergence (+):** Pure climber whose mountain rank is higher than their overall GC (e.g. Lenny Martinez +36, Pablo Castrillo +31).  
+            **Negative Divergence (−):** Flat / ITT specialist whose mountain rank drops relative to overall GC (e.g. Wout Van Aert −35, Matteo Trentin −30).
+            """)
+            scatter_chart = alt.Chart(parallel_df).mark_circle(size=80).encode(
+                x=alt.X("gc_rank:Q", title="Overall GC Rank"),
+                y=alt.Y("mtn_proxy_rank:Q", title="Mountain Proxy Rank"),
+                color=alt.Color("mtn_gc_divergence:Q", scale=alt.Scale(scheme="redblue", domainMid=0), title="Divergence"),
+                tooltip=["rider_name", "team_name", "gc_rank", "mtn_proxy_rank", "mtn_gc_divergence"]
+            ).properties(title="GC Rank vs. Mountain Proxy Rank (Diagonal = Parity)", height=340)
 
-        # Diagonal line
-        line_parity = alt.Chart(pd.DataFrame({'x': [1, 160], 'y': [1, 160]})).mark_line(color="gray", strokeDash=[4, 4]).encode(
-            x='x:Q',
-            y='y:Q'
-        )
+            line_parity = alt.Chart(pd.DataFrame({'x': [1, 160], 'y': [1, 160]})).mark_line(color="gray", strokeDash=[4, 4]).encode(
+                x='x:Q', y='y:Q'
+            )
+            st.altair_chart(scatter_chart + line_parity, use_container_width=True)
 
-        st.altair_chart(scatter_chart + line_parity, use_container_width=True)
+        with st.expander("📋 View Parallel Standings Data Table"):
+            st.dataframe(
+                parallel_df[[
+                    "gc_rank", "young_rank", "mtn_proxy_rank", "mtn_gc_divergence", 
+                    "bib_number", "rider_name", "team_name", "dob", "total_time_formatted"
+                ]],
+                column_config={
+                    "gc_rank": st.column_config.NumberColumn("Overall GC Rank", format="%d"),
+                    "young_rank": st.column_config.NumberColumn("Young Rider Rank", format="%d"),
+                    "mtn_proxy_rank": st.column_config.NumberColumn("Mountain Proxy Rank", format="%d"),
+                    "mtn_gc_divergence": st.column_config.NumberColumn("Divergence (GC - Mountain)", format="%+d"),
+                    "bib_number": "Bib",
+                    "rider_name": "Rider",
+                    "team_name": "Team",
+                    "dob": "Date of Birth",
+                    "total_time_formatted": "Total GC Time"
+                },
+                hide_index=True,
+                use_container_width=True
+            )
 
     # -------------------------------------------------------------------------
-    # TAB 3: E7
+    # TAB 3: E7 (Category A: Chart-First)
     # -------------------------------------------------------------------------
     with tab3:
         st.subheader("E7. Bonuses, Penalties, and Counterfactual GC Replay")
         st.markdown("""
-        Lay out cumulative bonuses and penalties per rider. Replay the GC leaderboard under **counterfactual toggles** 
-        (removing bonuses, removing penalties, or reverting to raw elapsed time) to illuminate movements into and out of the top ten.
+        Replay the GC leaderboard under **counterfactual what-if scenarios** (removing stage/sprint bonuses, 
+        removing disciplinary time penalties, or reverting strictly to raw elapsed time) to illuminate rank displacements.
         """)
 
-        cf_stage = st.slider("Select Stage Grain for Counterfactual Analysis:", min_value=1, max_value=21, value=21, step=1)
+        col_cf_ctrl1, col_cf_ctrl2 = st.columns([2, 1])
+        with col_cf_ctrl1:
+            cf_scenario = st.radio(
+                "Counterfactual Scenario:",
+                [
+                    "No Bonuses (Sprint & Finish Bonuses Removed)",
+                    "No Penalties (Time Penalties Removed)",
+                    "Raw Elapsed Time (Both Bonuses & Penalties Removed)"
+                ],
+                horizontal=True
+            )
+        with col_cf_ctrl2:
+            cf_stage = st.slider("Stage Grain for Replay:", min_value=1, max_value=21, value=5, step=1)
+
+        cf_top_n = st.slider("Display Contenders in Slope Chart:", min_value=10, max_value=30, value=15, step=5)
         cf_df = olap.get_counterfactual_gc(cf_stage)
 
-        col_cf1, col_cf2 = st.columns([1, 1])
-        with col_cf1:
-            st.metric("Riders Awarded Time Bonuses (10s/6s/4s)", int((cf_df["total_bonus"] > 0).sum()))
-        with col_cf2:
-            st.metric("Riders Assessed Time Penalties", int((cf_df["total_penalty"] > 0).sum()))
+        # Determine target columns based on selection
+        if cf_scenario.startswith("No Bonuses"):
+            target_col = "no_bonus_rank"
+            shift_col = "shift_no_bonus"
+            scen_name = "No-Bonus GC"
+        elif cf_scenario.startswith("No Penalties"):
+            target_col = "no_penalty_rank"
+            shift_col = "shift_no_penalty"
+            scen_name = "No-Penalty GC"
+        else:
+            target_col = "raw_rank"
+            shift_col = "shift_raw"
+            scen_name = "Raw Time GC"
 
-        st.markdown("#### Counterfactual Leaderboard & Rank Displacements")
+        # KPI Metrics Row
+        tot_displaced = int((cf_df[shift_col] != 0).sum())
+        col_m1, col_m2, col_m3 = st.columns(3)
+        with col_m1:
+            st.metric(f"Rank Displacements (Stage {cf_stage})", f"{tot_displaced} Riders", delta=f"{tot_displaced} shifts" if tot_displaced > 0 else "Steady")
+        with col_m2:
+            st.metric("Riders Awarded Bonuses", int((cf_df["total_bonus"] > 0).sum()), "10s / 6s / 4s Allocations")
+        with col_m3:
+            st.metric("Riders Assessed Penalties", int((cf_df["total_penalty"] > 0).sum()), "Drafting / Feed Zone Violations")
+
+        # Primary Visualization: Interactive Slope Chart
+        st.markdown(f"#### 📐 Interactive Slope Chart: Actual GC vs. {scen_name} (After Stage {cf_stage})")
         
-        # Display comparison table
-        st.dataframe(
-            cf_df[[
-                "actual_rank", "bib_number", "rider_name", "team_name", "actual_time_formatted",
-                "total_bonus", "total_penalty",
-                "no_bonus_rank", "shift_no_bonus",
-                "no_penalty_rank", "shift_no_penalty",
-                "raw_rank", "shift_raw"
-            ]],
-            column_config={
-                "actual_rank": st.column_config.NumberColumn("Actual GC", format="%d"),
-                "bib_number": "Bib",
-                "rider_name": "Rider",
-                "team_name": "Team",
-                "actual_time_formatted": "Actual Time",
-                "total_bonus": st.column_config.NumberColumn("Bonus", format="-%ds"),
-                "total_penalty": st.column_config.NumberColumn("Pen", format="+%ds"),
-                "no_bonus_rank": st.column_config.NumberColumn("No-Bonus Rank", format="%d"),
-                "shift_no_bonus": st.column_config.NumberColumn("Δ No-Bonus", format="%+d"),
-                "no_penalty_rank": st.column_config.NumberColumn("No-Penalty Rank", format="%d"),
-                "shift_no_penalty": st.column_config.NumberColumn("Δ No-Penalty", format="%+d"),
-                "raw_rank": st.column_config.NumberColumn("Raw Time Rank", format="%d"),
-                "shift_raw": st.column_config.NumberColumn("Δ Raw", format="%+d")
-            },
-            hide_index=True,
-            use_container_width=True
-        )
+        cf_sub = cf_df.head(cf_top_n).copy()
+        melted_cf = []
+        for _, r in cf_sub.iterrows():
+            shift_val = int(r[shift_col])
+            if shift_val > 0:
+                status = "Gained Rank (+)"
+            elif shift_val < 0:
+                status = "Lost Rank (−)"
+            else:
+                status = "Unchanged (=)"
 
-        st.markdown("""
+            melted_cf.append({
+                "rider_name": r["rider_name"],
+                "team_name": r["team_name"],
+                "scenario": "1. Actual GC",
+                "rank": int(r["actual_rank"]),
+                "shift": shift_val,
+                "shift_status": status,
+                "bonus": int(r["total_bonus"]),
+                "penalty": int(r["total_penalty"])
+            })
+            melted_cf.append({
+                "rider_name": r["rider_name"],
+                "team_name": r["team_name"],
+                "scenario": f"2. {scen_name}",
+                "rank": int(r[target_col]),
+                "shift": shift_val,
+                "shift_status": status,
+                "bonus": int(r["total_bonus"]),
+                "penalty": int(r["total_penalty"])
+            })
+        df_slope = pd.DataFrame(melted_cf)
+
+        slope_chart = alt.Chart(df_slope).mark_line(point=True, strokeWidth=2.5).encode(
+            x=alt.X("scenario:N", title="Classification Scenario", sort=["1. Actual GC", f"2. {scen_name}"]),
+            y=alt.Y("rank:Q", scale=alt.Scale(reverse=True, zero=False), title="Classification Rank (Inverted)"),
+            detail="rider_name:N",
+            color=alt.Color("shift_status:N", scale=alt.Scale(
+                domain=["Gained Rank (+)", "Lost Rank (−)", "Unchanged (=)"],
+                range=["#10b981", "#ef4444", "#94a3b8"]
+            ), title="Rank Movement"),
+            tooltip=[
+                alt.Tooltip("rider_name:N", title="Rider"),
+                alt.Tooltip("team_name:N", title="Team"),
+                alt.Tooltip("scenario:N", title="Scenario"),
+                alt.Tooltip("rank:Q", title="Rank"),
+                alt.Tooltip("shift:Q", title="Δ Rank Shift"),
+                alt.Tooltip("bonus:Q", title="Total Bonus (s)"),
+                alt.Tooltip("penalty:Q", title="Total Penalty (s)")
+            ]
+        ).properties(height=max(340, cf_top_n * 20))
+
+        st.altair_chart(slope_chart, use_container_width=True)
+
+        st.markdown(f"""
         <div class="narrative-box">
-            <h4>💡 Counterfactual Takeaways</h4>
-            <p>• <strong>Bonus Insulation:</strong> Tadej Pogacar accumulated <strong>52 seconds</strong> in sprint/stage win bonuses, shielding his GC buffer ahead of Jonas Vingegaard (34 bonus seconds).<br>
-            • <strong>Penalty Impact:</strong> Penalties (e.g. 10s assessed to Jordan Jegat and Jonathan Milan, 20s to Paul Penhoet) demonstrate the strict enforcement of feed-zone and drafting regulations.<br>
-            • Toggle between stage sliders above to observe how bonuses shifted the podium in tight stages!</p>
+            <h4>💡 Counterfactual Insights & What-If Findings (Stage {cf_stage})</h4>
+            <p>• <strong>Bonus Protection:</strong> In earlier stages (Stages 1–10), stage win and intermediate sprint bonuses created up to <strong>34 rank displacements</strong> across the peloton.<br>
+            • <strong>Disciplinary Penalties:</strong> Strict enforcement of feed-zone and drafting rules shifted contenders by 10–20 seconds.<br>
+            • <strong>End-of-Race Margins:</strong> By Stage 21, cumulative time gaps between top contenders widened into minutes, meaning bonus allocations insulated the podium rather than altering podium order.</p>
         </div>
         """, unsafe_allow_html=True)
 
+        with st.expander("📋 View Counterfactual Replay Data Table"):
+            st.dataframe(
+                cf_df[[
+                    "actual_rank", "bib_number", "rider_name", "team_name", "actual_time_formatted",
+                    "total_bonus", "total_penalty",
+                    "no_bonus_rank", "shift_no_bonus",
+                    "no_penalty_rank", "shift_no_penalty",
+                    "raw_rank", "shift_raw"
+                ]],
+                column_config={
+                    "actual_rank": st.column_config.NumberColumn("Actual GC", format="%d"),
+                    "bib_number": "Bib",
+                    "rider_name": "Rider",
+                    "team_name": "Team",
+                    "actual_time_formatted": "Actual Time",
+                    "total_bonus": st.column_config.NumberColumn("Bonus", format="-%ds"),
+                    "total_penalty": st.column_config.NumberColumn("Pen", format="+%ds"),
+                    "no_bonus_rank": st.column_config.NumberColumn("No-Bonus Rank", format="%d"),
+                    "shift_no_bonus": st.column_config.NumberColumn("Δ No-Bonus", format="%+d"),
+                    "no_penalty_rank": st.column_config.NumberColumn("No-Penalty Rank", format="%d"),
+                    "shift_no_penalty": st.column_config.NumberColumn("Δ No-Penalty", format="%+d"),
+                    "raw_rank": st.column_config.NumberColumn("Raw Time Rank", format="%d"),
+                    "shift_raw": st.column_config.NumberColumn("Δ Raw", format="%+d")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+
     # -------------------------------------------------------------------------
-    # TAB 4: E10
+    # TAB 4: E10 (Category A: Chart-First)
     # -------------------------------------------------------------------------
     with tab4:
         st.subheader("E10. Temporal GC Storyline & Inflection Points")
         st.markdown("""
-        Trace cumulative adjusted time gap to the leader after each stage for principal GC actors as an interactive line narrative.
-        Inflection points denote pivotal moments where high mountains or individual time-trials reshuffled the leaderboard.
+        Trace cumulative adjusted time gap to the leader after each stage as an interactive multi-line narrative.
+        Inflection points denote pivotal mountain stages and individual time trials that reshaped the standings.
         """)
 
-        # Default contenders: Top 6 GC contenders
-        top_bibs = [1, 11, 72, 191, 151, 221, 31, 71]
         all_riders_df = execute_query("SELECT bib_number, rider_name, team_name FROM rider ORDER BY bib_number ASC;")
         rider_dict = {f"Bib {r['bib_number']} - {r['rider_name']} ({r['team_name']})": r["bib_number"] for _, r in all_riders_df.iterrows()}
+
+        col_e10_1, col_e10_2 = st.columns([1, 2])
+        with col_e10_1:
+            metric_e10 = st.radio(
+                "Y-Axis Metric:",
+                ["Gap to Leader (Seconds)", "Progressive GC Rank (Inverted)", "Cumulative Time (Hours)"],
+                horizontal=False
+            )
+        with col_e10_2:
+            preset_e10 = st.selectbox(
+                "Quick Selection Presets:",
+                ["Podium Duel (Pogacar vs Vingegaard)", "Top 5 Contenders", "Top 10 Contenders", "All Squad Leaders", "Custom Selection"],
+                index=1
+            )
+
+        # Preset logic
+        if preset_e10 == "Podium Duel (Pogacar vs Vingegaard)":
+            default_bibs = [1, 11]
+        elif preset_e10 == "Top 5 Contenders":
+            default_bibs = [1, 11, 72, 191, 151]
+        elif preset_e10 == "Top 10 Contenders":
+            default_bibs = [1, 11, 72, 191, 151, 221, 31, 71, 171, 131]
+        elif preset_e10 == "All Squad Leaders":
+            leaders_df = execute_query("SELECT bib_number FROM rider WHERE is_leader = 1;")
+            default_bibs = leaders_df["bib_number"].tolist()
+        else:
+            default_bibs = [1, 11, 72, 191, 151]
 
         selected_labels = st.multiselect(
             "Select Contenders to Chart:",
             options=list(rider_dict.keys()),
-            default=[k for k, v in rider_dict.items() if v in top_bibs]
+            default=[k for k, v in rider_dict.items() if v in default_bibs]
         )
         selected_bibs = [rider_dict[k] for k in selected_labels]
 
         if selected_bibs:
-            storyline_df = olap.get_temporal_gc_storyline(selected_bibs)
-            
-            # Interactive Multi-Line Gap Chart
+            storyline_df = olap.get_temporal_gc_storyline(selected_bibs).copy()
+            storyline_df["cum_hours"] = (storyline_df["cum_time"] / 3600.0).round(2)
+
+            # Choose Y encoding
+            if metric_e10 == "Progressive GC Rank (Inverted)":
+                y_enc = alt.Y("gc_rank:Q", title="Progressive GC Rank (Inverted)", scale=alt.Scale(reverse=True, zero=False))
+            elif metric_e10 == "Cumulative Time (Hours)":
+                y_enc = alt.Y("cum_hours:Q", title="Cumulative Elapsed Time (Hours)", scale=alt.Scale(zero=False))
+            else:
+                y_enc = alt.Y("gap_to_leader:Q", title="Gap to GC Leader (Seconds)")
+
+            # Primary Multi-Line Chart
+            st.markdown(f"#### 📈 {metric_e10} across Stages 1–21")
             story_chart = alt.Chart(storyline_df).mark_line(point=True, strokeWidth=2.5).encode(
-                x=alt.X("stage_id:O", title="Stage Number"),
-                y=alt.Y("gap_to_leader:Q", title="Gap to GC Leader (Seconds)"),
-                color=alt.Color("rider_name:N", title="Contender"),
+                x=alt.X("stage_id:O", title="Stage Number (1–21)"),
+                y=y_enc,
+                color=alt.Color("rider_name:N", title="Contender", scale=alt.Scale(scheme="category10")),
                 tooltip=[
                     alt.Tooltip("stage_id:O", title="Stage"),
                     alt.Tooltip("stage_type:N", title="Terrain"),
+                    alt.Tooltip("distance_km:Q", title="Km"),
                     alt.Tooltip("rider_name:N", title="Rider"),
                     alt.Tooltip("gap_to_leader:Q", title="Gap (s)"),
+                    alt.Tooltip("cum_hours:Q", title="Cum Time (h)"),
                     alt.Tooltip("gc_rank:Q", title="GC Rank")
                 ]
-            ).properties(
-                title="Time Gap to GC Leader across 21 Stages",
-                height=420
-            )
+            ).properties(height=420)
+
             st.altair_chart(story_chart, use_container_width=True)
 
-            # Inflection Points Highlight
-            st.markdown("""
-            #### 📌 Key Race Inflection Points
-            - **Stage 5 (Caen ITT, 33.0 km):** First major GC separator where Remco Evenepoel won and gaps opened by over a minute between time-trialists and pure climbers.
-            - **Stage 10 (Le Mont-Dore Puy De Sancy, Mountain):** Hard summit finish in the Massif Central creating the first top-10 reshuffle.
-            - **Stage 12 & 14 (Hautacam & Luchon-Superbagnères, Pyrenees):** Decisive mountain battles establishing Pogacar and Vingegaard's commanding lead.
-            - **Stage 18 & 19 (Courchevel Col De La Loze & La Plagne, Alps):** Queen mountain stages solidifying the final podium positions.
-            """)
+            # Structured Inflection Points Cards
+            st.markdown("#### 📌 Key Inflection Points on the Course")
+            inf1, inf2, inf3, inf4 = st.columns(4)
+            with inf1:
+                st.markdown("""
+                <div class="metric-card" style="border-top: 4px solid #6366f1;">
+                    <span class="stage-pill stage-itt">Stage 5 ITT</span>
+                    <h4 style="margin: 6px 0 2px 0;">Caen (33.0 km)</h4>
+                    <p style="font-size: 0.85rem; color: #475569;">First major time-trial test: Remco Evenepoel wins at 53.95 km/h; gaps open over 1m between TT specialists and pure climbers.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            with inf2:
+                st.markdown("""
+                <div class="metric-card" style="border-top: 4px solid #ef4444;">
+                    <span class="stage-pill stage-mountain">Stage 10 MTN</span>
+                    <h4 style="margin: 6px 0 2px 0;">Puy de Sancy</h4>
+                    <p style="font-size: 0.85rem; color: #475569;">Brutal Massif Central summit finish creating the first sustained top-10 GC reshuffle before the first rest day.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            with inf3:
+                st.markdown("""
+                <div class="metric-card" style="border-top: 4px solid #ef4444;">
+                    <span class="stage-pill stage-mountain">Stages 12 & 14</span>
+                    <h4 style="margin: 6px 0 2px 0;">Pyrenean Highs</h4>
+                    <p style="font-size: 0.85rem; color: #475569;">Hautacam and Superbagnères summit showdowns establish Tadej Pogacar and Jonas Vingegaard's decisive GC gap.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            with inf4:
+                st.markdown("""
+                <div class="metric-card" style="border-top: 4px solid #ef4444;">
+                    <span class="stage-pill stage-mountain">Stages 18 & 19</span>
+                    <h4 style="margin: 6px 0 2px 0;">Alpine Queens</h4>
+                    <p style="font-size: 0.85rem; color: #475569;">Col de la Loze (2,304m) and La Plagne queen stages solidify podium positions heading into Paris.</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with st.expander("📋 View Temporal Stage-by-Stage Data Table"):
+                st.dataframe(storyline_df, hide_index=True, use_container_width=True)
+        else:
+            st.info("Select at least one contender above to display the temporal storyline.")
 
 
 # =============================================================================
@@ -634,16 +912,23 @@ elif menu == "🏔️ Stages & Terrain (E2, E5, E6, E11, E15)":
     ])
 
     # -------------------------------------------------------------------------
-    # TAB 1: E2
+    # TAB 1: E2 (Category B: Hybrid Chart + Table)
     # -------------------------------------------------------------------------
     with tab1:
         st.subheader("E2. A Stage in Focus: Vignette & Team Perspective")
-        st.markdown("Treat one stage as an intensive vignette: examine leading finishers, terrain profile, and which squads populated the top ten.")
+        st.markdown("""
+        Examine a single stage in high definition: inspect the stage winner, time gaps of the top ten finishers, 
+        and which teams populated the finale.
+        """)
 
-        selected_stage = st.selectbox("Select Stage (1 to 21):", options=list(range(1, 22)), index=11)
+        stages_all = execute_query("SELECT stage_id, stage_type, distance_km, start_location, finish_location FROM stage ORDER BY stage_id ASC;")
+        stage_labels = {f"Stage {r['stage_id']}: {r['start_location']} → {r['finish_location']} ({r['stage_type'].title()}, {r['distance_km']} km)": r['stage_id'] for _, r in stages_all.iterrows()}
+        
+        sel_label_e2 = st.selectbox("Select Stage to Inspect:", options=list(stage_labels.keys()), index=11)
+        selected_stage = stage_labels[sel_label_e2]
         vignette = olap.get_stage_vignette(selected_stage)
 
-        # Vignette Header Card
+        # Stage Metadata Header Card
         st.markdown(f"""
         <div class="narrative-box" style="border-left-color: #10b981;">
             <h4>🏁 Stage {vignette['stage_id']}: {vignette['start_location']} → {vignette['finish_location']}</h4>
@@ -652,217 +937,475 @@ elif menu == "🏔️ Stages & Terrain (E2, E5, E6, E11, E15)":
         </div>
         """, unsafe_allow_html=True)
 
+        finishers_df = olap.get_stage_finishers(selected_stage, top_n=10)
+        team_persp = olap.get_stage_team_perspective(selected_stage, top_n=10)
+
+        # Side-by-side: Primary Lollipop Chart + Secondary Team Presence Chart
         col_st1, col_st2 = st.columns([3, 2])
         with col_st1:
-            st.markdown("#### Leading Stage Finishers")
-            finishers_df = olap.get_stage_finishers(selected_stage, top_n=12)
-            st.dataframe(
-                finishers_df[[
-                    "rank", "bib_number", "rider_name", "team_name", "country_code", 
-                    "time_formatted", "gap_formatted", "bonus", "penalty"
-                ]],
-                column_config={
-                    "rank": st.column_config.NumberColumn("Pos", format="%d"),
-                    "bib_number": "Bib",
-                    "rider_name": "Rider",
-                    "team_name": "Team",
-                    "country_code": "Nat",
-                    "time_formatted": "Adjusted Time",
-                    "gap_formatted": "Gap",
-                    "bonus": st.column_config.NumberColumn("Bonus", format="-%ds"),
-                    "penalty": st.column_config.NumberColumn("Pen", format="+%ds")
-                },
-                hide_index=True,
-                use_container_width=True
+            st.markdown("#### 🍭 Top-10 Finishers: Adjusted Time Gap to Winner")
+            # Lollipop chart
+            stem_e2 = alt.Chart(finishers_df).mark_rule(color="#cbd5e1", strokeWidth=2).encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending"), title="Finish Position"),
+                x=alt.X("gap:Q", title="Adjusted Time Gap to Winner (Seconds)"),
+                x2=alt.value(0)
             )
+
+            dot_e2 = alt.Chart(finishers_df).mark_circle(size=140).encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending")),
+                x=alt.X("gap:Q"),
+                color=alt.condition(
+                    alt.datum.rank == 1,
+                    alt.value("#eab308"), # Gold for winner
+                    alt.condition(alt.datum.rank <= 3, alt.value("#2563eb"), alt.value("#64748b"))
+                ),
+                tooltip=[
+                    alt.Tooltip("rank:Q", title="Finish Rank"),
+                    alt.Tooltip("rider_name:N", title="Rider"),
+                    alt.Tooltip("team_name:N", title="Team"),
+                    alt.Tooltip("country_code:N", title="Nat"),
+                    alt.Tooltip("time_formatted:N", title="Adjusted Time"),
+                    alt.Tooltip("gap_formatted:N", title="Gap to Winner"),
+                    alt.Tooltip("bonus:Q", title="Bonus (s)"),
+                    alt.Tooltip("penalty:Q", title="Penalty (s)")
+                ]
+            )
+
+            label_e2 = alt.Chart(finishers_df).mark_text(
+                align="left", baseline="middle", dx=7, fontSize=11, color="#334155"
+            ).encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending")),
+                x=alt.X("gap:Q"),
+                text=alt.Text("gap_formatted:N")
+            )
+
+            st.altair_chart((stem_e2 + dot_e2 + label_e2).properties(height=320), use_container_width=True)
 
         with col_st2:
-            st.markdown("#### Team Representation in Top 10")
-            team_persp = olap.get_stage_team_perspective(selected_stage, top_n=10)
-            
-            bar_team = alt.Chart(team_persp).mark_bar(color="#0284c7").encode(
-                x=alt.X("top_finishers_count:Q", title="Count of Riders in Top 10"),
+            st.markdown("#### 👥 Squad Representation in Top 10")
+            bar_team = alt.Chart(team_persp).mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, color="#0284c7").encode(
+                x=alt.X("top_finishers_count:Q", title="Count of Riders in Top 10", axis=alt.Axis(tickMinStep=1)),
                 y=alt.Y("team_name:N", sort="-x", title="Team"),
-                tooltip=["team_name", "top_finishers_count", "riders_in_top_n"]
-            ).properties(height=260)
+                tooltip=[
+                    alt.Tooltip("team_name:N", title="Team"),
+                    alt.Tooltip("top_finishers_count:Q", title="Top 10 Riders"),
+                    alt.Tooltip("riders_in_top_n:N", title="Finishers")
+                ]
+            ).properties(height=320)
             st.altair_chart(bar_team, use_container_width=True)
 
-            st.dataframe(
-                team_persp[["team_name", "top_finishers_count", "riders_in_top_n"]],
-                column_config={
-                    "team_name": "Team",
-                    "top_finishers_count": st.column_config.NumberColumn("Top 10 Count", format="%d"),
-                    "riders_in_top_n": "Riders & Finishes"
-                },
-                hide_index=True,
-                use_container_width=True
-            )
+        # Detail Table below charts
+        st.markdown("#### 📋 Leading Stage Finishers & Time Adjustments")
+        st.dataframe(
+            finishers_df[[
+                "rank", "bib_number", "rider_name", "team_name", "country_code", 
+                "time_formatted", "gap_formatted", "bonus", "penalty"
+            ]],
+            column_config={
+                "rank": st.column_config.NumberColumn("Pos", format="P%d"),
+                "bib_number": "Bib",
+                "rider_name": "Rider",
+                "team_name": "Team",
+                "country_code": "Nat",
+                "time_formatted": "Adjusted Time",
+                "gap_formatted": "Gap to Winner",
+                "bonus": st.column_config.NumberColumn("Bonus", format="-%ds"),
+                "penalty": st.column_config.NumberColumn("Pen", format="+%ds")
+            },
+            hide_index=True,
+            use_container_width=True
+        )
 
     # -------------------------------------------------------------------------
-    # TAB 2: E5
+    # TAB 2: E5 (Category A: Chart-First)
     # -------------------------------------------------------------------------
     with tab2:
         st.subheader("E5. Mountain Contours: Podiums & Time Gaps to Winner")
         st.markdown("""
-        Surface two distinct mountain-specific signals: **podium frequency on Mountain stages** and **mean time gap to the stage winner** on mountain terrain.
-        Drill down to inspect the daily traces that produced these summaries.
+        Surface two mountain-specific signals: **podium frequency on Mountain stages** (Top 3 finishes) 
+        and **mean time gap to the stage winner** calculated strictly across high-mountain days.
         """)
 
         mtn_contours = olap.get_mountain_contours()
 
-        st.dataframe(
-            mtn_contours.head(15)[[
-                "bib_number", "rider_name", "team_name", "mountain_stages_completed",
-                "mountain_podium_count", "mean_gap_formatted", "best_mountain_rank"
-            ]],
-            column_config={
-                "bib_number": "Bib",
-                "rider_name": "Rider",
-                "team_name": "Team",
-                "mountain_stages_completed": st.column_config.NumberColumn("Stages Done", format="%d"),
-                "mountain_podium_count": st.column_config.NumberColumn("Mountain Podiums (Top 3)", format="%d"),
-                "mean_gap_formatted": "Mean Gap to Winner",
-                "best_mountain_rank": st.column_config.NumberColumn("Best Finish", format="P%d")
-            },
-            hide_index=True,
-            use_container_width=True
+        # Primary Visualization: Bubble Scatter Plot
+        st.markdown("#### 🫧 Mountain Performance: Podium Frequency vs. Mean Time Gap to Winner")
+        st.caption("Top-left quadrant indicates elite mountain climbers (high podium count and tight time gaps to the winner).")
+
+        bubble_e5 = alt.Chart(mtn_contours.head(30)).mark_circle().encode(
+            x=alt.X("mountain_podium_count:Q", title="Mountain Stage Podiums (Top 3 Finishes)", axis=alt.Axis(tickMinStep=1)),
+            y=alt.Y("mean_gap_to_winner_seconds:Q", title="Mean Gap to Mountain Stage Winner (s, Inverted)", scale=alt.Scale(reverse=True, zero=False)),
+            size=alt.Size("mountain_stages_completed:Q", title="Mountain Stages Done", scale=alt.Scale(range=[100, 500])),
+            color=alt.Color("best_mountain_rank:Q", scale=alt.Scale(scheme="turbo", reverse=True), title="Best Mountain Rank"),
+            tooltip=[
+                alt.Tooltip("rider_name:N", title="Rider"),
+                alt.Tooltip("team_name:N", title="Team"),
+                alt.Tooltip("mountain_podium_count:Q", title="Mountain Podiums"),
+                alt.Tooltip("mean_gap_formatted:N", title="Mean Gap to Winner"),
+                alt.Tooltip("best_mountain_rank:Q", title="Best Mountain Finish"),
+                alt.Tooltip("mountain_stages_completed:Q", title="Mountain Stages Done")
+            ]
+        ).properties(height=380)
+
+        # Highlight labels for top mountain riders
+        top_mtn_labels = alt.Chart(mtn_contours.head(7)).mark_text(
+            align="left", baseline="bottom", dx=8, dy=-4, fontSize=11, fontWeight="bold", color="#1e293b"
+        ).encode(
+            x="mountain_podium_count:Q",
+            y="mean_gap_to_winner_seconds:Q",
+            text="rider_name:N"
         )
 
+        st.altair_chart(bubble_e5 + top_mtn_labels, use_container_width=True)
+
+        with st.expander("📋 View Mountain Contours Summary Table"):
+            st.dataframe(
+                mtn_contours.head(25)[[
+                    "bib_number", "rider_name", "team_name", "mountain_stages_completed",
+                    "mountain_podium_count", "mean_gap_formatted", "best_mountain_rank"
+                ]],
+                column_config={
+                    "bib_number": "Bib",
+                    "rider_name": "Rider",
+                    "team_name": "Team",
+                    "mountain_stages_completed": st.column_config.NumberColumn("Stages Done", format="%d"),
+                    "mountain_podium_count": st.column_config.NumberColumn("Mountain Podiums", format="%d"),
+                    "mean_gap_formatted": "Mean Gap to Winner",
+                    "best_mountain_rank": st.column_config.NumberColumn("Best Finish", format="P%d")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+
         st.markdown("---")
-        st.markdown("#### 🔍 Return to Daily Mountain Traces")
-        rider_mtn_dict = {f"Bib {r['bib_number']} - {r['rider_name']} ({r['team_name']})": r["bib_number"] for _, r in mtn_contours.head(20).iterrows()}
-        selected_mtn_rider = st.selectbox("Select rider for mountain trace review:", options=list(rider_mtn_dict.keys()))
+        st.markdown("### 🔍 Daily Mountain Traces Drilldown")
+        rider_mtn_dict = {f"Bib {r['bib_number']} - {r['rider_name']} ({r['team_name']})": r["bib_number"] for _, r in mtn_contours.head(25).iterrows()}
+        selected_mtn_rider = st.selectbox("Select rider for daily mountain trace review:", options=list(rider_mtn_dict.keys()), index=0)
         sel_mtn_bib = rider_mtn_dict[selected_mtn_rider]
 
         traces_df = olap.get_rider_mountain_traces(sel_mtn_bib)
-        st.dataframe(
-            traces_df[[
-                "stage_id", "stage_date", "distance_km", "start_location", "finish_location",
-                "rank", "adj_time_formatted", "gap_formatted"
-            ]],
-            column_config={
-                "stage_id": st.column_config.NumberColumn("Stage #", format="%d"),
-                "stage_date": "Date",
-                "distance_km": st.column_config.NumberColumn("Km", format="%.1f"),
-                "start_location": "Origin",
-                "finish_location": "Destination",
-                "rank": st.column_config.NumberColumn("Finish Rank", format="%d"),
-                "adj_time_formatted": "Adjusted Time",
-                "gap_formatted": "Gap to Stage Winner"
-            },
-            hide_index=True,
-            use_container_width=True
-        )
+        if not traces_df.empty:
+            traces_chart = alt.Chart(traces_df).mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, color="#ef4444").encode(
+                y=alt.Y("finish_location:N", sort=alt.EncodingSortField(field="stage_id", order="ascending"), title="Mountain Summit"),
+                x=alt.X("gap_to_stage_winner:Q", title="Gap to Stage Winner (Seconds)"),
+                tooltip=[
+                    alt.Tooltip("stage_id:Q", title="Stage #"),
+                    alt.Tooltip("finish_location:N", title="Summit"),
+                    alt.Tooltip("distance_km:Q", title="Km"),
+                    alt.Tooltip("rank:Q", title="Finish Rank"),
+                    alt.Tooltip("gap_formatted:N", title="Gap to Winner")
+                ]
+            ).properties(title=f"Time Gap to Winner across Mountain Stages - {selected_mtn_rider}", height=220)
+            st.altair_chart(traces_chart, use_container_width=True)
+
+        with st.expander("🏔️ View Daily Mountain Stage Traces Table"):
+            st.dataframe(
+                traces_df[[
+                    "stage_id", "stage_date", "distance_km", "start_location", "finish_location",
+                    "rank", "adj_time_formatted", "gap_formatted"
+                ]],
+                column_config={
+                    "stage_id": st.column_config.NumberColumn("Stage #", format="%d"),
+                    "stage_date": "Date",
+                    "distance_km": st.column_config.NumberColumn("Km", format="%.1f"),
+                    "start_location": "Origin",
+                    "finish_location": "Destination",
+                    "rank": st.column_config.NumberColumn("Finish Rank", format="P%d"),
+                    "adj_time_formatted": "Adjusted Time",
+                    "gap_formatted": "Gap to Stage Winner"
+                },
+                hide_index=True,
+                use_container_width=True
+            )
 
     # -------------------------------------------------------------------------
-    # TAB 3: E6
+    # TAB 3: E6 (Category A: Chart-First)
     # -------------------------------------------------------------------------
     with tab3:
         st.subheader("E6. Speed Profiles as Simple Ratio (Distance / Time)")
         st.markdown("""
-        Chart stage-type speed profiles using the proxy $\\text{km/h} = \\text{length\_km} / (\\text{time} / 3600)$ across **Flat, Hilly, Mountain, and ITT**.
-        Emphasize riders and squads who gain significant relative advantage when terrain shifts away from Flat/Hilly toward Mountain.
+        Chart stage-type speed profiles using the ratio $\\text{km/h} = \\text{length\_km} / (\\text{time} / 3600)$ 
+        across **Flat, Hilly, Mountain, and Individual Time-Trial** terrains.
         """)
 
-        team_speeds = olap.get_team_speed_profile()
+        col_e6_1, col_e6_2 = st.columns([1, 2])
+        with col_e6_1:
+            perspective_e6 = st.radio("Speed Perspective:", ["Team Speed Profiles", "Top Contender Speed Profiles"], horizontal=False)
 
-        # Team speed overview table
+        team_speeds = olap.get_team_speed_profile()
+        rider_speeds = olap.get_speed_by_stage_type()
+
+        # Format terrain names
+        terrain_order = ["flat", "hilly", "mountain", "individual time-trial"]
+        terrain_display = {"flat": "Flat", "hilly": "Hilly", "mountain": "Mountain", "individual time-trial": "ITT"}
+
+        if perspective_e6 == "Team Speed Profiles":
+            all_teams = sorted(team_speeds["team_name"].unique())
+            with col_e6_2:
+                sel_teams_e6 = st.multiselect("Filter Teams:", options=all_teams, default=all_teams[:6])
+            
+            sub_speed = team_speeds[team_speeds["team_name"].isin(sel_teams_e6)].copy()
+            sub_speed["terrain_name"] = sub_speed["stage_type"].map(terrain_display)
+
+            # Primary Multi-Line Profile
+            st.markdown("#### 📉 Team Average Speed Profile across Terrains")
+            speed_chart = alt.Chart(sub_speed).mark_line(point=True, strokeWidth=2.5).encode(
+                x=alt.X("terrain_name:N", sort=["Flat", "Hilly", "Mountain", "ITT"], title="Terrain Type"),
+                y=alt.Y("avg_speed_kmh:Q", title="Average Speed (km/h)", scale=alt.Scale(zero=False)),
+                color=alt.Color("team_name:N", title="Squad"),
+                tooltip=[
+                    alt.Tooltip("team_name:N", title="Team"),
+                    alt.Tooltip("terrain_name:N", title="Terrain"),
+                    alt.Tooltip("avg_speed_kmh:Q", title="Avg Speed (km/h)")
+                ]
+            ).properties(height=380)
+            st.altair_chart(speed_chart, use_container_width=True)
+
+        else:
+            top_bibs_e6 = [1, 11, 72, 191, 151, 31, 101]
+            avail_riders = rider_speeds.drop_duplicates(subset=["bib_number"])[["bib_number", "rider_name", "team_name"]]
+            rider_map_e6 = {f"Bib {r['bib_number']} - {r['rider_name']} ({r['team_name']})": r["bib_number"] for _, r in avail_riders.iterrows()}
+            
+            with col_e6_2:
+                sel_r_labels = st.multiselect(
+                    "Filter Contenders:",
+                    options=list(rider_map_e6.keys()),
+                    default=[k for k, v in rider_map_e6.items() if v in top_bibs_e6]
+                )
+            sel_r_bibs = [rider_map_e6[k] for k in sel_r_labels]
+            
+            sub_r_speed = rider_speeds[rider_speeds["bib_number"].isin(sel_r_bibs)].copy()
+            sub_r_speed["terrain_name"] = sub_r_speed["stage_type"].map(terrain_display)
+
+            # Contender Multi-Line Chart
+            st.markdown("#### 📉 Contender Speed Profile across Terrains")
+            speed_chart = alt.Chart(sub_r_speed).mark_line(point=True, strokeWidth=2.5).encode(
+                x=alt.X("terrain_name:N", sort=["Flat", "Hilly", "Mountain", "ITT"], title="Terrain Type"),
+                y=alt.Y("avg_speed_kmh:Q", title="Average Speed (km/h)", scale=alt.Scale(zero=False)),
+                color=alt.Color("rider_name:N", title="Contender"),
+                tooltip=[
+                    alt.Tooltip("rider_name:N", title="Rider"),
+                    alt.Tooltip("team_name:N", title="Team"),
+                    alt.Tooltip("terrain_name:N", title="Terrain"),
+                    alt.Tooltip("avg_speed_kmh:Q", title="Avg Speed (km/h)")
+                ]
+            ).properties(height=380)
+            st.altair_chart(speed_chart, use_container_width=True)
+
+        # Pivot Speed Table
         pivot_speed = team_speeds.pivot(index="team_name", columns="stage_type", values="avg_speed_kmh").reset_index()
         pivot_speed["flat_to_mtn_ratio"] = (pivot_speed["mountain"] / pivot_speed["flat"] * 100.0).round(1)
 
-        st.dataframe(
-            pivot_speed.sort_values("mountain", ascending=False),
-            column_config={
-                "team_name": "Team",
-                "flat": st.column_config.NumberColumn("Flat Speed", format="%.2f km/h"),
-                "hilly": st.column_config.NumberColumn("Hilly Speed", format="%.2f km/h"),
-                "mountain": st.column_config.NumberColumn("Mountain Speed", format="%.2f km/h"),
-                "individual time-trial": st.column_config.NumberColumn("ITT Speed", format="%.2f km/h"),
-                "flat_to_mtn_ratio": st.column_config.NumberColumn("Mountain/Flat Retention (%)", format="%.1f%%")
-            },
-            hide_index=True,
-            use_container_width=True
-        )
+        with st.expander("📋 View Speed by Terrain Matrix & Retention Table"):
+            st.dataframe(
+                pivot_speed.sort_values("mountain", ascending=False),
+                column_config={
+                    "team_name": "Team",
+                    "flat": st.column_config.NumberColumn("Flat Speed", format="%.2f km/h"),
+                    "hilly": st.column_config.NumberColumn("Hilly Speed", format="%.2f km/h"),
+                    "mountain": st.column_config.NumberColumn("Mountain Speed", format="%.2f km/h"),
+                    "individual time-trial": st.column_config.NumberColumn("ITT Speed", format="%.2f km/h"),
+                    "flat_to_mtn_ratio": st.column_config.NumberColumn("Mountain/Flat Retention (%)", format="%.1f%%")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
 
     # -------------------------------------------------------------------------
-    # TAB 4: E11
+    # TAB 4: E11 (Category C: Table/Cards-First)
     # -------------------------------------------------------------------------
     with tab4:
         st.subheader("E11. Against the Clock: Individual Time Trial Catalogue")
-        st.markdown("Surface the inventory of ITT stages and present their essentials—date, distance, winner, speed, and compact catalogue.")
+        st.markdown("""
+        The 2025 Tour includes **two individual time trials** with completely contrasting profiles:
+        a 33.0 km flat power course in Normandy and a 10.9 km uphill mountain test in the Pyrenees.
+        """)
 
         itt_df = olap.get_itt_catalogue()
-
-        for _, row in itt_df.iterrows():
+        
+        # Category C Recommended Layout: Two Side-by-Side Comparison Cards
+        col_itt1, col_itt2 = st.columns(2)
+        
+        # Stage 5 Card
+        stg5_info = itt_df[itt_df["stage_id"] == 5].iloc[0]
+        stg5_top3 = olap.get_stage_finishers(5, top_n=3)
+        with col_itt1:
             st.markdown(f"""
-            <div class="metric-card" style="border-left: 6px solid #4f46e5;">
+            <div class="metric-card" style="border-top: 5px solid #4f46e5; height: 100%;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <span class="stage-pill stage-itt">ITT STAGE {row['stage_id']}</span>
-                        <h3 style="margin: 6px 0 2px 0;">{row['start_location']} → {row['finish_location']}</h3>
-                        <div style="color: #64748b; font-size: 0.9rem;">{row['stage_date']} | <strong>{row['distance_km']} km</strong> against the clock</div>
-                    </div>
-                    <div style="text-align: right;">
-                        <div style="font-size: 0.85rem; color: #64748b; font-weight: 600;">STAGE WINNER</div>
-                        <div style="font-size: 1.3rem; font-weight: 800; color: #1e1b4b;">{row['winner_name']}</div>
-                        <div style="font-size: 0.85rem; color: #475569;">{row['winner_team']}</div>
-                        <div style="font-size: 1.05rem; font-weight: 700; color: #4338ca; margin-top: 4px;">{row['winning_time_formatted']} ({row['winner_speed_kmh']} km/h)</div>
+                    <span class="stage-pill stage-itt">ITT STAGE 5</span>
+                    <span style="font-weight: 700; color: #4338ca;">{stg5_info['distance_km']} km (Flat ITT)</span>
+                </div>
+                <h3 style="margin: 8px 0 2px 0; color: #1e1b4b;">{stg5_info['start_location']} → {stg5_info['finish_location']}</h3>
+                <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 12px;">Date: {stg5_info['stage_date']} | Flat rolling route through Normandy</div>
+                
+                <div style="background: #eef2ff; border-radius: 8px; padding: 12px; margin-bottom: 14px;">
+                    <div style="font-size: 0.8rem; font-weight: 700; color: #4338ca; text-transform: uppercase;">Stage Winner</div>
+                    <div style="font-size: 1.25rem; font-weight: 800; color: #0f172a;">{stg5_info['winner_name']}</div>
+                    <div style="font-size: 0.85rem; color: #475569;">{stg5_info['winner_team']}</div>
+                    <div style="font-size: 1.05rem; font-weight: 700; color: #3730a3; margin-top: 4px;">
+                        ⏱️ {stg5_info['winning_time_formatted']} ({stg5_info['winner_speed_kmh']} km/h)
                     </div>
                 </div>
-            </div>
+                
+                <div style="font-size: 0.85rem; font-weight: 700; color: #334155; margin-bottom: 6px;">Podium Finishers:</div>
             """, unsafe_allow_html=True)
+            for _, r in stg5_top3.iterrows():
+                badge_emoji = "🥇" if r["rank"] == 1 else ("🥈" if r["rank"] == 2 else "🥉")
+                gap_lbl = "Winner" if r["rank"] == 1 else r["gap_formatted"]
+                st.markdown(f"• **{badge_emoji} P{r['rank']} {r['rider_name']}** ({r['team_name']}) — `{r['time_formatted']}` ({gap_lbl})")
+            
+            # Mini horizontal gap bar
+            mini_stg5 = alt.Chart(stg5_top3).mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3, color="#6366f1").encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending"), title=None),
+                x=alt.X("gap:Q", title="Gap to Winner (s)"),
+                tooltip=["rank:Q", "rider_name:N", "time_formatted:N", "gap_formatted:N"]
+            ).properties(height=110)
+            st.altair_chart(mini_stg5, use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("#### Full ITT Leaderboards")
-        itt_stage_sel = st.radio("Inspect ITT Stage Leaderboard:", options=itt_df["stage_id"].tolist(), format_func=lambda x: f"Stage {x}")
-        itt_finishers = olap.get_stage_finishers(itt_stage_sel, top_n=10)
+        # Stage 13 Card
+        stg13_info = itt_df[itt_df["stage_id"] == 13].iloc[0]
+        stg13_top3 = olap.get_stage_finishers(13, top_n=3)
+        with col_itt2:
+            st.markdown(f"""
+            <div class="metric-card" style="border-top: 5px solid #ef4444; height: 100%;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="stage-pill stage-mountain">ITT STAGE 13</span>
+                    <span style="font-weight: 700; color: #b91c1c;">{stg13_info['distance_km']} km (Mountain ITT)</span>
+                </div>
+                <h3 style="margin: 8px 0 2px 0; color: #7f1d1d;">{stg13_info['start_location']} → {stg13_info['finish_location']}</h3>
+                <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 12px;">Date: {stg13_info['stage_date']} | Steep Pyrenean mountain time-trial</div>
+                
+                <div style="background: #fef2f2; border-radius: 8px; padding: 12px; margin-bottom: 14px;">
+                    <div style="font-size: 0.8rem; font-weight: 700; color: #b91c1c; text-transform: uppercase;">Stage Winner</div>
+                    <div style="font-size: 1.25rem; font-weight: 800; color: #0f172a;">{stg13_info['winner_name']}</div>
+                    <div style="font-size: 0.85rem; color: #475569;">{stg13_info['winner_team']}</div>
+                    <div style="font-size: 1.05rem; font-weight: 700; color: #991b1b; margin-top: 4px;">
+                        ⏱️ {stg13_info['winning_time_formatted']} ({stg13_info['winner_speed_kmh']} km/h)
+                    </div>
+                </div>
+                
+                <div style="font-size: 0.85rem; font-weight: 700; color: #334155; margin-bottom: 6px;">Podium Finishers:</div>
+            """, unsafe_allow_html=True)
+            for _, r in stg13_top3.iterrows():
+                badge_emoji = "🥇" if r["rank"] == 1 else ("🥈" if r["rank"] == 2 else "🥉")
+                gap_lbl = "Winner" if r["rank"] == 1 else r["gap_formatted"]
+                st.markdown(f"• **{badge_emoji} P{r['rank']} {r['rider_name']}** ({r['team_name']}) — `{r['time_formatted']}` ({gap_lbl})")
+            
+            # Mini horizontal gap bar
+            mini_stg13 = alt.Chart(stg13_top3).mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3, color="#ef4444").encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending"), title=None),
+                x=alt.X("gap:Q", title="Gap to Winner (s)"),
+                tooltip=["rank:Q", "rider_name:N", "time_formatted:N", "gap_formatted:N"]
+            ).properties(height=110)
+            st.altair_chart(mini_stg13, use_container_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        # Compact Detail Table
+        st.markdown("#### 📋 Detailed ITT Stage Leaderboards")
+        itt_sel = st.radio("Select Stage for Full Top 10 Finishes:", [5, 13], format_func=lambda s: f"Stage {s} ({'Caen Flat ITT' if s == 5 else 'Peyragudes Mountain ITT'})", horizontal=True)
+        itt_finishers = olap.get_stage_finishers(itt_sel, top_n=10)
         st.dataframe(
             itt_finishers[["rank", "bib_number", "rider_name", "team_name", "country_code", "time_formatted", "gap_formatted"]],
-            hide_index=True,
-            use_container_width=True
-        )
-
-    # -------------------------------------------------------------------------
-    # TAB 5: E15
-    # -------------------------------------------------------------------------
-    with tab5:
-        st.subheader("E15. The Long Day: Spotlight on Longest Routes")
-        st.markdown("Sort all stages by distance to spotlight the longest route, its geographic profile, and leading finishers.")
-
-        dist_stages = olap.get_stages_by_distance()
-        longest = dist_stages.iloc[0]
-
-        # Spotlight Card
-        st.markdown(f"""
-        <div class="narrative-box" style="border-left-color: #8b5cf6;">
-            <h4>👑 The Long Day: Stage {longest['stage_id']} ({longest['distance_km']} km)</h4>
-            <p><strong>Route:</strong> {longest['start_location']} → {longest['finish_location']} on {longest['stage_date']}<br>
-            <strong>Terrain:</strong> {longest['stage_type'].title()}<br>
-            <strong>Challenge:</strong> At {longest['distance_km']} km, this was the ultimate test of endurance in the opening week across northern France, requiring relentless bunch positioning over 4.5 hours of racing.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("#### Leading Finishers on the Longest Day")
-        long_finishers = olap.get_stage_finishers(int(longest["stage_id"]), top_n=10)
-        st.dataframe(
-            long_finishers[["rank", "bib_number", "rider_name", "team_name", "country_code", "time_formatted", "gap_formatted"]],
-            hide_index=True,
-            use_container_width=True
-        )
-
-        st.markdown("#### All Stages Ranked by Distance")
-        st.dataframe(
-            dist_stages,
             column_config={
-                "stage_id": "Stage #",
-                "distance_km": st.column_config.NumberColumn("Distance (km)", format="%.1f km"),
-                "stage_type": "Terrain",
-                "stage_date": "Date",
-                "start_location": "Origin",
-                "finish_location": "Destination"
+                "rank": st.column_config.NumberColumn("Rank", format="P%d"),
+                "bib_number": "Bib",
+                "rider_name": "Rider",
+                "team_name": "Team",
+                "country_code": "Nat",
+                "time_formatted": "Adjusted Time",
+                "gap_formatted": "Gap to Winner"
             },
             hide_index=True,
             use_container_width=True
         )
+
+    # -------------------------------------------------------------------------
+    # TAB 5: E15 (Category B: Hybrid Chart + Table)
+    # -------------------------------------------------------------------------
+    with tab5:
+        st.subheader("E15. The Long Day: Spotlight on Longest Routes")
+        st.markdown("""
+        Spotlight the longest route on the Tour de France itinerary, its geographic endurance profile, 
+        and leading finishers.
+        """)
+
+        dist_stages = olap.get_stages_by_distance().copy()
+        longest = dist_stages.iloc[0]
+
+        # Stage selector for comparison
+        stage_names_map = {f"Stage {r['stage_id']}: {r['start_location']} → {r['finish_location']} ({r['distance_km']} km)": r['stage_id'] for _, r in dist_stages.iterrows()}
+        selected_long_label = st.selectbox("Highlight Stage for Inspection:", options=list(stage_names_map.keys()), index=0)
+        sel_stage_dist = stage_names_map[selected_long_label]
+        sel_row = dist_stages[dist_stages["stage_id"] == sel_stage_dist].iloc[0]
+
+        # Summary Spotlight Card
+        is_longest_sel = (sel_stage_dist == int(longest["stage_id"]))
+        st.markdown(f"""
+        <div class="narrative-box" style="border-left-color: {'#8b5cf6' if is_longest_sel else '#0284c7'};">
+            <h4>👑 {'The Longest Day of the Tour' if is_longest_sel else f'Stage Spotlight: Stage {sel_row["stage_id"]}'} ({sel_row['distance_km']} km)</h4>
+            <p><strong>Route:</strong> {sel_row['start_location']} → {sel_row['finish_location']} on {sel_row['stage_date']}<br>
+            <strong>Terrain:</strong> {sel_row['stage_type'].title()} Stage<br>
+            <strong>Endurance Challenge:</strong> At <strong>{sel_row['distance_km']} km</strong>, this route demanded immense stamina and bunch positioning over 4.5 hours of racing.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Primary Visualization: Ranked Horizontal Bar Chart showing Stage Distances
+        st.markdown("#### 📏 All 21 Stages Ranked by Distance (km)")
+        
+        dist_stages["is_highlighted"] = dist_stages["stage_id"] == sel_stage_dist
+        dist_stages["stage_label"] = "Stage " + dist_stages["stage_id"].astype(str) + " (" + dist_stages["stage_type"].str.title() + ")"
+
+        bar_e15 = alt.Chart(dist_stages).mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4).encode(
+            y=alt.Y("stage_label:N", sort=alt.EncodingSortField(field="distance_km", order="descending"), title="Stage (Type)"),
+            x=alt.X("distance_km:Q", title="Distance (km)"),
+            color=alt.Color("is_highlighted:N", scale=alt.Scale(domain=[True, False], range=["#f59e0b", "#3b82f6"]), legend=None),
+            tooltip=[
+                alt.Tooltip("stage_id:Q", title="Stage #"),
+                alt.Tooltip("distance_km:Q", title="Distance (km)"),
+                alt.Tooltip("stage_type:N", title="Terrain"),
+                alt.Tooltip("stage_date:N", title="Date"),
+                alt.Tooltip("start_location:N", title="Origin"),
+                alt.Tooltip("finish_location:N", title="Destination")
+            ]
+        ).properties(height=450)
+
+        st.altair_chart(bar_e15, use_container_width=True)
+
+        # Detail Table for Stage Finishers
+        st.markdown(f"#### 🏆 Leading Finishers: Stage {sel_stage_dist} ({sel_row['distance_km']} km)")
+        long_finishers = olap.get_stage_finishers(int(sel_stage_dist), top_n=10)
+        st.dataframe(
+            long_finishers[["rank", "bib_number", "rider_name", "team_name", "country_code", "time_formatted", "gap_formatted"]],
+            column_config={
+                "rank": st.column_config.NumberColumn("Rank", format="P%d"),
+                "bib_number": "Bib",
+                "rider_name": "Rider",
+                "team_name": "Team",
+                "country_code": "Nat",
+                "time_formatted": "Adjusted Time",
+                "gap_formatted": "Gap to Winner"
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+
+        with st.expander("📋 View Complete 21-Stage Distance Ranking Table"):
+            st.dataframe(
+                dist_stages[["stage_id", "stage_date", "distance_km", "stage_type", "start_location", "finish_location"]],
+                column_config={
+                    "stage_id": "Stage #",
+                    "distance_km": st.column_config.NumberColumn("Distance (km)", format="%.1f km"),
+                    "stage_type": "Terrain",
+                    "stage_date": "Date",
+                    "start_location": "Origin",
+                    "finish_location": "Destination"
+                },
+                hide_index=True,
+                use_container_width=True
+            )
 
 
 # =============================================================================
@@ -876,102 +1419,206 @@ elif menu == "👥 Teams & Squads (E3, E13, E14)":
     ])
 
     # -------------------------------------------------------------------------
-    # TAB 1: E3
+    # TAB 1: E3 (Category A: Chart-First)
     # -------------------------------------------------------------------------
     with tab1:
         st.subheader("E3. Team Burden and Contribution")
         st.markdown("""
-        Roll up each team's aggregate adjusted time over the event, then open the aggregation to reveal 
-        which riders carried the time load and how their per-stage profiles shaped the team's outcome.
+        Roll up each team's aggregate adjusted time across the entire Tour, then open the aggregation to reveal 
+        which riders carried the time load.
         """)
 
         team_sum = olap.get_team_summary()
-        
-        st.markdown("#### Team Aggregate Standings (All 23 Squads)")
-        st.dataframe(
-            team_sum[[
-                "team_name", "country_code", "roster_count", "active_finishers", 
-                "time_formatted", "gap_to_lead_team", "total_stage_results"
-            ]],
-            column_config={
-                "team_name": "Team",
-                "country_code": "Country",
-                "roster_count": st.column_config.NumberColumn("Roster", format="%d"),
-                "active_finishers": st.column_config.NumberColumn("Finishers", format="%d"),
-                "time_formatted": "Cumulative Adjusted Time",
-                "gap_to_lead_team": "Gap to Leader",
-                "total_stage_results": "Total Results Count"
-            },
-            hide_index=True,
-            use_container_width=True
-        )
+        all_burden = olap.get_all_teams_rider_contributions()
 
-        st.markdown("---")
-        st.markdown("### 🔍 Open Aggregation: Rider Burden Breakdown")
-        
-        sel_team_e3 = st.selectbox("Select a Team to inspect rider load:", options=team_sum["team_name"].tolist())
-        burden_df = olap.get_team_rider_contributions(sel_team_e3)
+        col_e3_1, col_e3_2 = st.columns([1, 2])
+        with col_e3_1:
+            e3_view = st.radio("Visualization Mode:", ["100% Stacked Squad Comparison", "Single Squad Deep Dive"], horizontal=False)
 
-        st.dataframe(
-            burden_df[[
-                "bib_number", "rider_name", "role", "is_leader", "status",
-                "stages_completed", "time_formatted", "pct_team_burden", "avg_stage_rank", "best_stage_rank"
-            ]],
-            column_config={
-                "bib_number": "Bib",
-                "rider_name": "Rider",
-                "role": "Role",
-                "is_leader": "Is Leader",
-                "status": "Status",
-                "stages_completed": st.column_config.NumberColumn("Stages", format="%d"),
-                "time_formatted": "Rider Time",
-                "pct_team_burden": st.column_config.NumberColumn("Share of Team Time (%)", format="%.2f%%"),
-                "avg_stage_rank": st.column_config.NumberColumn("Avg Rank", format="%.1f"),
-                "best_stage_rank": st.column_config.NumberColumn("Best Rank", format="P%d")
-            },
-            hide_index=True,
-            use_container_width=True
-        )
+        if e3_view == "100% Stacked Squad Comparison":
+            with col_e3_2:
+                top_teams_e3 = st.slider("Display Teams:", min_value=5, max_value=23, value=12, step=1)
 
-        # Burden Share Chart
-        burden_chart = alt.Chart(burden_df).mark_bar().encode(
-            x=alt.X("pct_team_burden:Q", title="Share of Team Total Adjusted Time (%)"),
-            y=alt.Y("rider_name:N", sort="-x", title="Rider"),
-            color=alt.Color("is_leader:N", scale=alt.Scale(domain=[1, 0], range=["#eab308", "#3b82f6"]), title="Is Leader"),
-            tooltip=["rider_name", "role", "pct_team_burden", "time_formatted", "status"]
-        ).properties(height=240, title=f"Time Burden Distribution - {sel_team_e3}")
-        st.altair_chart(burden_chart, use_container_width=True)
+            top_team_names = team_sum.head(top_teams_e3)["team_name"].tolist()
+            sub_burden = all_burden[all_burden["team_name"].isin(top_team_names)].copy()
+
+            # Primary Visualization: 100% Stacked Horizontal Bar Chart
+            st.markdown(f"#### 📊 100% Stacked Bar Chart: Rider Contributions to Team Aggregate Time (Top {top_teams_e3} Squads)")
+            st.caption("Each bar sums to 100% of squad aggregate time; segments illustrate rider roles and attrition impact.")
+
+            e3_stacked = alt.Chart(sub_burden).mark_bar().encode(
+                y=alt.Y("team_name:N", sort=top_team_names, title="Team (Ordered by Aggregate Time)"),
+                x=alt.X("pct_team_burden:Q", stack="zero", title="Share of Total Squad Time (%)", axis=alt.Axis(format=".0f")),
+                color=alt.Color("role:N", scale=alt.Scale(scheme="tableau10"), title="Rider Squad Role"),
+                tooltip=[
+                    alt.Tooltip("team_name:N", title="Team"),
+                    alt.Tooltip("rider_name:N", title="Rider"),
+                    alt.Tooltip("role:N", title="Role"),
+                    alt.Tooltip("is_leader:N", title="Is Leader"),
+                    alt.Tooltip("pct_team_burden:Q", title="Share of Team Time (%)"),
+                    alt.Tooltip("stages_completed:Q", title="Stages Done"),
+                    alt.Tooltip("status:N", title="Status")
+                ]
+            ).properties(height=max(320, top_teams_e3 * 26))
+
+            st.altair_chart(e3_stacked, use_container_width=True)
+
+        else:
+            with col_e3_2:
+                sel_team_e3 = st.selectbox("Select Squad to Deep Dive:", options=team_sum["team_name"].tolist(), index=0)
+
+            team_riders_e3 = olap.get_team_rider_contributions(sel_team_e3)
+
+            # Single squad breakdown chart
+            st.markdown(f"#### 🚴 Rider Time Burden Distribution: {sel_team_e3}")
+            single_e3_bar = alt.Chart(team_riders_e3).mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4).encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="pct_team_burden", order="descending"), title="Rider"),
+                x=alt.X("pct_team_burden:Q", title="Share of Squad Aggregate Time (%)"),
+                color=alt.condition(
+                    alt.datum.is_leader == 1,
+                    alt.value("#eab308"), # Leader Gold
+                    alt.condition(alt.datum.status == "Completed", alt.value("#2563eb"), alt.value("#ef4444"))
+                ),
+                tooltip=[
+                    alt.Tooltip("rider_name:N", title="Rider"),
+                    alt.Tooltip("role:N", title="Role"),
+                    alt.Tooltip("is_leader:N", title="Is Leader"),
+                    alt.Tooltip("pct_team_burden:Q", title="Share of Team Time (%)"),
+                    alt.Tooltip("time_formatted:N", title="Cumulative Time"),
+                    alt.Tooltip("stages_completed:Q", title="Stages Done"),
+                    alt.Tooltip("status:N", title="Status")
+                ]
+            ).properties(height=260)
+
+            label_single_e3 = alt.Chart(team_riders_e3).mark_text(
+                align="left", baseline="middle", dx=6, fontSize=11, color="#334155"
+            ).encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="pct_team_burden", order="descending")),
+                x=alt.X("pct_team_burden:Q"),
+                text=alt.Text("pct_team_burden:Q", format=".2f")
+            )
+            st.altair_chart(single_e3_bar + label_single_e3, use_container_width=True)
+
+        st.markdown("""
+        <div class="narrative-box">
+            <h4>💡 Analytical Insight: Aggregate Time Contribution vs. Performance</h4>
+            <p>• <strong>Aggregate Burden vs. GC Performance:</strong> In a team aggregate time calculation, riders who survive all 21 stages each contribute approximately <strong>12.5% to 15.0%</strong> of the team's total seconds.<br>
+            • <strong>Attrition Discrepancy:</strong> Riders who exit mid-race (DNS/DNF) contribute a disproportionately lower percentage of total seconds (e.g. 1% to 10%) simply because they logged fewer stages—clarifying why aggregate time must be analyzed alongside individual completion status.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        with st.expander("📋 View Team Aggregate Standings Table"):
+            st.dataframe(
+                team_sum[[
+                    "team_name", "country_code", "roster_count", "active_finishers", 
+                    "time_formatted", "gap_to_lead_team", "total_stage_results"
+                ]],
+                column_config={
+                    "team_name": "Team",
+                    "country_code": "Country",
+                    "roster_count": st.column_config.NumberColumn("Roster", format="%d"),
+                    "active_finishers": st.column_config.NumberColumn("Finishers", format="%d"),
+                    "time_formatted": "Cumulative Adjusted Time",
+                    "gap_to_lead_team": "Gap to Lead Squad",
+                    "total_stage_results": "Total Results Count"
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+
+        with st.expander("🚴 View Rider Burden Details Table"):
+            sel_exp_team = st.selectbox("Inspect Full Squad Burden Table:", options=team_sum["team_name"].tolist(), index=0, key="exp_team_e3")
+            b_df = olap.get_team_rider_contributions(sel_exp_team)
+            st.dataframe(
+                b_df[[
+                    "bib_number", "rider_name", "role", "is_leader", "status",
+                    "stages_completed", "time_formatted", "pct_team_burden", "avg_stage_rank", "best_stage_rank"
+                ]],
+                column_config={
+                    "bib_number": "Bib",
+                    "rider_name": "Rider",
+                    "role": "Role",
+                    "is_leader": "Is Leader",
+                    "status": "Status",
+                    "stages_completed": st.column_config.NumberColumn("Stages", format="%d"),
+                    "time_formatted": "Rider Time",
+                    "pct_team_burden": st.column_config.NumberColumn("Share of Team Time (%)", format="%.2f%%"),
+                    "avg_stage_rank": st.column_config.NumberColumn("Avg Rank", format="%.1f"),
+                    "best_stage_rank": st.column_config.NumberColumn("Best Rank", format="P%d")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
 
     # -------------------------------------------------------------------------
-    # TAB 2: E13
+    # TAB 2: E13 (Category B: Hybrid Chart + Table)
     # -------------------------------------------------------------------------
     with tab2:
-        st.subheader("E13. Depth of Squads & Attrition")
+        st.subheader("E13. Depth of Squads & Roster Attrition")
         st.markdown("""
-        At the rider grain, portray team depth via distinct rider counts, highlighting squads with the broadest rosters
-        and providing a doorway to their full rider lists and countries.
+        Every team initially starts with **8 riders**. Trace roster attrition and squad retention 
+        by comparing riders who completed all 21 stages against mid-race exits (DNS/DNF).
         """)
 
-        squad_df = olap.get_squad_depth()
+        squad_df = olap.get_squad_depth().copy()
 
-        st.dataframe(
-            squad_df,
-            column_config={
-                "team_name": "Team",
-                "country_code": "Country",
-                "starting_riders": st.column_config.NumberColumn("Starting Roster", format="%d"),
-                "active_finishers": st.column_config.NumberColumn("21-Stage Finishers", format="%d"),
-                "exit_count": st.column_config.NumberColumn("Exits (DNS/Withdrawal)", format="%d"),
-                "survival_rate_pct": st.column_config.NumberColumn("Survival Rate", format="%.1f%%")
-            },
-            hide_index=True,
-            use_container_width=True
-        )
+        # Summary KPIs
+        sq1, sq2, sq3 = st.columns(3)
+        with sq1:
+            st.metric("Total Starting Rosters", "23 Squads (184 Riders)", "8 Riders per Squad")
+        with sq2:
+            st.metric("Squads with 100% Retention (8/8)", "5 Squads Intact", "Arkéa, Israel, Picnic, Visma, Tudor")
+        with sq3:
+            st.metric("Total Race Exits", "24 Exited Riders", "87.0% Overall Pelton Survival Rate")
+
+        # Primary Visualization: Segmented Horizontal Bar Chart
+        st.markdown("#### 🛡️ Squad Depth & Roster Survival (8-Rider Initial Roster)")
+        
+        melted_sq = []
+        for _, r in squad_df.iterrows():
+            c_ratio = f"{int(r['active_finishers'])}/8"
+            melted_sq.append({
+                "team_name": r["team_name"],
+                "status": "Completed (21 Stages)",
+                "count": int(r["active_finishers"]),
+                "ratio": c_ratio,
+                "rate": float(r["survival_rate_pct"])
+            })
+            melted_sq.append({
+                "team_name": r["team_name"],
+                "status": "Exited (DNS/DNF)",
+                "count": int(r["exit_count"]),
+                "ratio": c_ratio,
+                "rate": float(r["survival_rate_pct"])
+            })
+        df_sq_melt = pd.DataFrame(melted_sq)
+
+        bar_e13 = alt.Chart(df_sq_melt).mark_bar().encode(
+            y=alt.Y("team_name:N", sort=alt.EncodingSortField(field="count", op="max", order="descending"), title="Team"),
+            x=alt.X("count:Q", title="Roster Breakdown (Max 8 Riders)", scale=alt.Scale(domain=[0, 8])),
+            color=alt.Color("status:N", scale=alt.Scale(
+                domain=["Completed (21 Stages)", "Exited (DNS/DNF)"],
+                range=["#10b981", "#f43f5e"]
+            ), title="Status"),
+            tooltip=[
+                alt.Tooltip("team_name:N", title="Team"),
+                alt.Tooltip("status:N", title="Status"),
+                alt.Tooltip("count:Q", title="Count"),
+                alt.Tooltip("ratio:N", title="Roster Ratio"),
+                alt.Tooltip("rate:Q", title="Survival Rate (%)")
+            ]
+        ).properties(height=480)
+
+        st.altair_chart(bar_e13, use_container_width=True)
 
         st.markdown("---")
         st.markdown("#### 🚪 Doorway to Full Squad Rosters")
-        door_team = st.selectbox("Select Team to Inspect Full Roster:", options=squad_df["team_name"].tolist())
+        door_team = st.selectbox("Select Team to Inspect Full Roster:", options=squad_df["team_name"].tolist(), index=0)
         roster_df = olap.get_team_roster(door_team)
+
+        # Team specific retention ratio badge
+        active_cnt = (roster_df["status"] == "Active / Completed").sum()
+        st.markdown(f"**Roster Retention Ratio:** `{active_cnt}/8 Riders Completed` ({active_cnt * 12.5:.1f}%)")
 
         st.dataframe(
             roster_df,
@@ -988,14 +1635,29 @@ elif menu == "👥 Teams & Squads (E3, E13, E14)":
             use_container_width=True
         )
 
+        with st.expander("📋 View Full Squad Survival & Depth Summary Table"):
+            st.dataframe(
+                squad_df,
+                column_config={
+                    "team_name": "Team",
+                    "country_code": "Country",
+                    "starting_riders": st.column_config.NumberColumn("Starting Roster", format="%d"),
+                    "active_finishers": st.column_config.NumberColumn("21-Stage Finishers", format="%d"),
+                    "exit_count": st.column_config.NumberColumn("Exits", format="%d"),
+                    "survival_rate_pct": st.column_config.NumberColumn("Survival Rate", format="%.1f%%")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+
     # -------------------------------------------------------------------------
-    # TAB 3: E14
+    # TAB 3: E14 (Category A: Chart-First)
     # -------------------------------------------------------------------------
     with tab3:
         st.subheader("E14. Top-Ten Intensity by Team across Terrains")
         st.markdown("""
-        Aggregate top-ten presences at the team level broken down by stage type (Flat, Hilly, Mountain, ITT);
-        pair the totals with links back to the specific stages and riders involved.
+        Aggregate top-ten stage presences at the squad level broken down by stage terrain 
+        (**Flat, Hilly, Mountain, ITT**), highlighting which teams dominate specific profiles.
         """)
 
         intensity_df = olap.get_team_top10_intensity()
@@ -1008,23 +1670,48 @@ elif menu == "👥 Teams & Squads (E3, E13, E14)":
             var_name="stage_type",
             value_name="top10_count"
         )
-        melted_int["stage_type"] = melted_int["stage_type"].str.replace("_top10", "").str.upper()
+        terrain_label_map = {
+            "flat_top10": "Flat",
+            "hilly_top10": "Hilly",
+            "mountain_top10": "Mountain",
+            "itt_top10": "ITT"
+        }
+        melted_int["terrain_name"] = melted_int["stage_type"].map(terrain_label_map)
 
-        stacked_chart = alt.Chart(melted_int).mark_bar().encode(
-            x=alt.X("top10_count:Q", title="Top 10 Presences"),
+        col_e14_1, col_e14_2 = st.columns([1, 1])
+        with col_e14_1:
+            e14_stack_mode = st.radio("Display Mode:", ["Total Top-10 Count", "100% Normalized Terrain Share"], horizontal=True)
+        with col_e14_2:
+            terrains_sel = st.multiselect("Filter Terrains:", ["Flat", "Hilly", "Mountain", "ITT"], default=["Flat", "Hilly", "Mountain", "ITT"])
+
+        filtered_int = melted_int[melted_int["terrain_name"].isin(terrains_sel)].copy()
+
+        # Primary Visualization: Stacked Bar Chart by Stage Type
+        st.markdown("#### 📊 Top-10 Stage Presences by Team and Terrain")
+        
+        stack_param = "normalize" if e14_stack_mode == "100% Normalized Terrain Share" else "zero"
+        x_title = "Share of Top-10 Presences (%)" if stack_param == "normalize" else "Top-10 Stage Presences"
+        x_format = "%" if stack_param == "normalize" else "d"
+
+        stacked_chart = alt.Chart(filtered_int).mark_bar().encode(
             y=alt.Y("team_name:N", sort="-x", title="Team"),
-            color=alt.Color("stage_type:N", title="Terrain", scale=alt.Scale(
-                domain=["FLAT", "HILLY", "MOUNTAIN", "ITT"],
-                range=["#22c55e", "#eab308", "#ef4444", "#6366f1"]
+            x=alt.X("top10_count:Q", stack=stack_param, title=x_title, axis=alt.Axis(format=x_format)),
+            color=alt.Color("terrain_name:N", title="Terrain Type", scale=alt.Scale(
+                domain=["Flat", "Hilly", "Mountain", "ITT"],
+                range=["#10b981", "#f59e0b", "#ef4444", "#6366f1"]
             )),
-            tooltip=["team_name", "stage_type", "top10_count"]
-        ).properties(title="Top-10 Stage Presences by Team and Terrain", height=440)
+            tooltip=[
+                alt.Tooltip("team_name:N", title="Team"),
+                alt.Tooltip("terrain_name:N", title="Terrain"),
+                alt.Tooltip("top10_count:Q", title="Top 10 Count")
+            ]
+        ).properties(height=460)
 
         st.altair_chart(stacked_chart, use_container_width=True)
 
         st.markdown("---")
         st.markdown("#### 🔗 Drilldown to Specific Top-10 Finishes")
-        drill_team = st.selectbox("Select Team for finish links:", options=intensity_df["team_name"].tolist())
+        drill_team = st.selectbox("Select Team for finish links:", options=intensity_df["team_name"].tolist(), index=0)
         drill_df = olap.get_team_top10_drilldown(drill_team)
 
         st.dataframe(
@@ -1041,6 +1728,21 @@ elif menu == "👥 Teams & Squads (E3, E13, E14)":
             use_container_width=True
         )
 
+        with st.expander("📋 View Complete Team Top-10 Intensity Matrix Table"):
+            st.dataframe(
+                intensity_df,
+                column_config={
+                    "team_name": "Team",
+                    "flat_top10": st.column_config.NumberColumn("Flat Top 10", format="%d"),
+                    "hilly_top10": st.column_config.NumberColumn("Hilly Top 10", format="%d"),
+                    "mountain_top10": st.column_config.NumberColumn("Mountain Top 10", format="%d"),
+                    "itt_top10": st.column_config.NumberColumn("ITT Top 10", format="%d"),
+                    "total_top10_presences": st.column_config.NumberColumn("Total Presences", format="%d")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+
 
 # =============================================================================
 # MODULE 5: NATIONS & OUTCOMES (E8, E9, E12)
@@ -1053,19 +1755,91 @@ elif menu == "🌍 Nations & Consistency (E8, E9, E12)":
     ])
 
     # -------------------------------------------------------------------------
-    # TAB 1: E8
+    # TAB 1: E8 (Category B: Hybrid Chart + Table)
     # -------------------------------------------------------------------------
     with tab1:
         st.subheader("E8. Participation by Nation")
         st.markdown("""
-        Summarize nations by their presence—count of teams and count of riders—then open the roll-up 
-        to list the riders and their associated teams for a chosen country.
+        Summarize national representation across the peloton—distinguishing **individual rider citizenship** 
+        from **commercial team registration**—then drill down to examine each nation's roster.
         """)
 
         nation_part = olap.get_nation_participation()
 
-        col_n1, col_n2 = st.columns([3, 2])
-        with col_n1:
+        # Secondary Metrics Row
+        n1, n2, n3, n4 = st.columns(4)
+        with n1:
+            st.metric("Represented Nations", len(nation_part), "Global Representation")
+        with n2:
+            fra_row = nation_part[nation_part["country_code"] == "FRA"].iloc[0]
+            st.metric("Host Nation (France)", f"{fra_row['rider_count']} Riders", f"{fra_row['team_count']} French-Licensed Teams")
+        with n3:
+            bel_row = nation_part[nation_part["country_code"] == "BEL"].iloc[0]
+            st.metric("Belgium", f"{bel_row['rider_count']} Riders", f"{bel_row['team_count']} Belgian Teams")
+        with n4:
+            non_eu_cnt = (nation_part["team_count"] == 0).sum()
+            st.metric("Nations without Domestic Teams", f"{non_eu_cnt} Countries", "Riders on International Trade Squads")
+
+        col_n_ctrl1, col_n_ctrl2 = st.columns([2, 1])
+        with col_n_ctrl1:
+            top_n_nations = st.slider("Display Top Nations in Bar Chart:", min_value=5, max_value=len(nation_part), value=15, step=1)
+
+        # Primary Visualization: Ranked Horizontal Bar Chart showing Riders per Nation
+        st.markdown("#### 🌍 Peloton Participation by Nation")
+        sub_nat = nation_part.head(top_n_nations).copy()
+
+        bar_nation = alt.Chart(sub_nat).mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, color="#2563eb").encode(
+            y=alt.Y("country_name:N", sort=alt.EncodingSortField(field="rider_count", order="descending"), title="Country"),
+            x=alt.X("rider_count:Q", title="Rider Count", axis=alt.Axis(tickMinStep=1)),
+            tooltip=[
+                alt.Tooltip("country_name:N", title="Country"),
+                alt.Tooltip("country_code:N", title="Code"),
+                alt.Tooltip("rider_count:Q", title="Riders"),
+                alt.Tooltip("team_count:Q", title="Teams Based Here"),
+                alt.Tooltip("pct_peloton:Q", title="Share of Peloton (%)")
+            ]
+        ).properties(height=max(280, top_n_nations * 22))
+
+        label_nation = alt.Chart(sub_nat).mark_text(
+            align="left", baseline="middle", dx=6, fontSize=11, color="#334155"
+        ).encode(
+            y=alt.Y("country_name:N", sort=alt.EncodingSortField(field="rider_count", order="descending")),
+            x=alt.X("rider_count:Q"),
+            text=alt.Text("rider_count:Q")
+        )
+        st.altair_chart(bar_nation + label_nation, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("#### 🔍 Drilldown: National Roster & Commercial Squads")
+        country_options = {f"{r['country_name']} ({r['country_code']}) — {r['rider_count']} riders": r["country_code"] for _, r in nation_part.iterrows()}
+        selected_c_label = st.selectbox("Choose Country to Open:", options=list(country_options.keys()), index=0)
+        selected_ccode = country_options[selected_c_label]
+
+        country_riders = olap.get_nation_riders(selected_ccode)
+
+        st.markdown(f"""
+        <div class="narrative-box" style="border-left-color: #3b82f6;">
+            <h4>Athlete Nationality vs. Team Registration</h4>
+            <p>Riders listed below compete under the flag of <strong>{selected_c_label.split(' — ')[0]}</strong>, though they may ride for trade squads registered in different countries.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.dataframe(
+            country_riders,
+            column_config={
+                "bib_number": "Bib",
+                "rider_name": "Rider",
+                "dob": "Date of Birth",
+                "role": "Role",
+                "is_leader": "Is Leader",
+                "team_name": "Commercial Trade Squad",
+                "status": "Race Status"
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+
+        with st.expander("📋 View Complete Nation Participation Summary Table"):
             st.dataframe(
                 nation_part,
                 column_config={
@@ -1079,67 +1853,62 @@ elif menu == "🌍 Nations & Consistency (E8, E9, E12)":
                 use_container_width=True
             )
 
-        with col_n2:
-            nation_bar = alt.Chart(nation_part.head(10)).mark_bar(color="#3b82f6").encode(
-                x=alt.X("rider_count:Q", title="Riders Count"),
-                y=alt.Y("country_name:N", sort="-x", title="Country"),
-                tooltip=["country_name", "rider_count", "team_count", "pct_peloton"]
-            ).properties(title="Top 10 Nations by Rider Count", height=320)
-            st.altair_chart(nation_bar, use_container_width=True)
-
-        st.markdown("---")
-        st.markdown("#### 🔍 Open the Roll-up: Country Squad Inspection")
-        country_options = {f"{r['country_name']} ({r['country_code']})": r["country_code"] for _, r in nation_part.iterrows()}
-        selected_c_label = st.selectbox("Choose Country to Open:", options=list(country_options.keys()))
-        selected_ccode = country_options[selected_c_label]
-
-        country_riders = olap.get_nation_riders(selected_ccode)
-        st.dataframe(
-            country_riders,
-            column_config={
-                "bib_number": "Bib",
-                "rider_name": "Rider",
-                "dob": "DOB",
-                "role": "Role",
-                "is_leader": "Is Leader",
-                "team_name": "Team",
-                "status": "Race Status"
-            },
-            hide_index=True,
-            use_container_width=True
-        )
-
     # -------------------------------------------------------------------------
-    # TAB 2: E9
+    # TAB 2: E9 (Category A: Chart-First)
     # -------------------------------------------------------------------------
     with tab2:
         st.subheader("E9. National Outcomes within Available Data")
         st.markdown("""
-        For each nation, note the **best GC rank** achieved by its riders and tally **stage wins and podiums**;
-        keep the pathway back to the underlying stages and athletes clear.
+        Compare national participation against tangible outcomes—**stage wins**, **stage podiums**, 
+        and **best final GC rank**—to contrast peloton size with athletic efficiency.
         """)
 
         outcomes_df = olap.get_national_outcomes()
 
-        st.dataframe(
-            outcomes_df[[
-                "country_code", "country_name", "best_gc_rank_str", "stage_wins", "stage_podiums", "stage_top10s"
-            ]],
-            column_config={
-                "country_code": "Code",
-                "country_name": "Nation",
-                "best_gc_rank_str": "Best Final GC Rank",
-                "stage_wins": st.column_config.NumberColumn("Stage Wins (1st)", format="%d"),
-                "stage_podiums": st.column_config.NumberColumn("Stage Podiums (Top 3)", format="%d"),
-                "stage_top10s": st.column_config.NumberColumn("Top 10 Finishes", format="%d")
-            },
-            hide_index=True,
-            use_container_width=True
+        # Primary Visualization: Bubble Scatter Plot
+        st.markdown("#### 🫧 National Participation vs. Stage Podium Performance")
+        st.caption("Top-left bubble position indicates exceptional athletic efficiency (high podium conversion relative to peloton size).")
+
+        bubble_e9 = alt.Chart(outcomes_df).mark_circle().encode(
+            x=alt.X("rider_count:Q", title="National Rider Count (Participation)", axis=alt.Axis(tickMinStep=1)),
+            y=alt.Y("stage_podiums:Q", title="Stage Podiums (Top 3 Finishes)", axis=alt.Axis(tickMinStep=1)),
+            size=alt.Size("stage_wins:Q", title="Stage Wins (1st)", scale=alt.Scale(range=[120, 600])),
+            color=alt.Color("best_gc_rank:Q", scale=alt.Scale(scheme="viridis", reverse=True), title="Best Final GC Rank"),
+            tooltip=[
+                alt.Tooltip("country_name:N", title="Nation"),
+                alt.Tooltip("country_code:N", title="Code"),
+                alt.Tooltip("rider_count:Q", title="Riders"),
+                alt.Tooltip("stage_wins:Q", title="Stage Wins"),
+                alt.Tooltip("stage_podiums:Q", title="Stage Podiums"),
+                alt.Tooltip("stage_top10s:Q", title="Stage Top 10s"),
+                alt.Tooltip("best_gc_rank_str:N", title="Best Final GC")
+            ]
+        ).properties(height=400)
+
+        # Highlight labels on distinctive nations
+        labeled_nations = outcomes_df[outcomes_df["country_code"].isin(["SLO", "BEL", "DEN", "FRA", "NED", "ITA", "AUS", "GBR"])].copy()
+        labels_e9 = alt.Chart(labeled_nations).mark_text(
+            align="left", baseline="middle", dx=10, fontSize=11, fontWeight="bold", color="#1e293b"
+        ).encode(
+            x="rider_count:Q",
+            y="stage_podiums:Q",
+            text="country_name:N"
         )
+
+        st.altair_chart(bubble_e9 + labels_e9, use_container_width=True)
+
+        st.markdown("""
+        <div class="narrative-box">
+            <h4>💡 National Efficiency Contrasts</h4>
+            <p>• <strong>Slovenia:</strong> Only 5 riders in the peloton, yet captured <strong>4 Stage Wins, 11 Podiums</strong>, and the <strong>Yellow Jersey (Pogacar)</strong>—unmatched podium efficiency.<br>
+            • <strong>Belgium & Denmark:</strong> Converted compact squads into 4 and 2 stage wins respectively, with Remco Evenepoel, Wout Van Aert, and Jonas Vingegaard.<br>
+            • <strong>France:</strong> Largest contingent with 32 riders and 33 top-10 finishes, demonstrating collective depth across stages.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
         st.markdown("---")
         st.markdown("#### 🔗 Pathway to Contributing Stages & Athletes")
-        sel_c_out = st.selectbox("Inspect Stage Outcomes for Nation:", options=sorted(outcomes_df["country_name"].unique()))
+        sel_c_out = st.selectbox("Inspect Stage Outcomes for Nation:", options=sorted(outcomes_df["country_name"].unique()), index=sorted(outcomes_df["country_name"].unique()).index("Slovenia") if "Slovenia" in outcomes_df["country_name"].unique() else 0)
         c_code_sel = outcomes_df[outcomes_df["country_name"] == sel_c_out]["country_code"].iloc[0]
 
         q_pathway = """
@@ -1150,7 +1919,11 @@ elif menu == "🌍 Nations & Consistency (E8, E9, E12)":
             r.rank,
             rd.bib_number,
             rd.rider_name,
-            rd.team_name
+            rd.team_name,
+            r.finish_time,
+            r.bonus,
+            r.penalty,
+            r.adj_time
         FROM result_with_adj_time r
         JOIN stage s ON r.stage_id = s.stage_id
         JOIN rider rd ON r.bib_number = rd.bib_number
@@ -1159,41 +1932,97 @@ elif menu == "🌍 Nations & Consistency (E8, E9, E12)":
         """
         pathway_df = execute_query(q_pathway, (c_code_sel,))
         if not pathway_df.empty:
-            st.dataframe(pathway_df, hide_index=True, use_container_width=True)
+            pathway_df["adj_time_formatted"] = pathway_df["adj_time"].apply(format_seconds)
+            st.dataframe(
+                pathway_df[["stage_id", "stage_date", "stage_type", "rank", "bib_number", "rider_name", "team_name", "adj_time_formatted"]],
+                column_config={
+                    "stage_id": st.column_config.NumberColumn("Stage #", format="%d"),
+                    "stage_date": "Date",
+                    "stage_type": "Terrain",
+                    "rank": st.column_config.NumberColumn("Finish Rank", format="P%d"),
+                    "bib_number": "Bib",
+                    "rider_name": "Rider",
+                    "team_name": "Team",
+                    "adj_time_formatted": "Adjusted Time"
+                },
+                hide_index=True,
+                use_container_width=True
+            )
         else:
             st.info(f"No stage podiums (top 3) recorded for {sel_c_out}.")
 
+        with st.expander("📋 View National Outcomes Summary Table"):
+            st.dataframe(
+                outcomes_df[[
+                    "country_code", "country_name", "rider_count", "best_gc_rank_str", "stage_wins", "stage_podiums", "stage_top10s"
+                ]],
+                column_config={
+                    "country_code": "Code",
+                    "country_name": "Nation",
+                    "rider_count": st.column_config.NumberColumn("Riders", format="%d"),
+                    "best_gc_rank_str": "Best Final GC Rank",
+                    "stage_wins": st.column_config.NumberColumn("Stage Wins (1st)", format="%d"),
+                    "stage_podiums": st.column_config.NumberColumn("Stage Podiums (Top 3)", format="%d"),
+                    "stage_top10s": st.column_config.NumberColumn("Top 10 Finishes", format="%d")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+
     # -------------------------------------------------------------------------
-    # TAB 3: E12
+    # TAB 3: E12 (Category A: Chart-First)
     # -------------------------------------------------------------------------
     with tab3:
         st.subheader("E12. Consistency Near the Front")
         st.markdown("""
-        From the space of high finishes, identify the riders who most often appear in the top ten;
-        accompany the summary with the list of contributing stages, their ranks, and stage types.
+        From the space of high finishes, identify riders who most frequently appear in the top ten, 
+        and inspect their stage-by-stage consistency fingerprint across all 21 stages.
         """)
 
-        consistency_df = olap.get_consistency_ranking(15)
+        col_e12_ctrl1, _ = st.columns([1, 1])
+        with col_e12_ctrl1:
+            top_n_cons = st.slider("Display Consistent Contenders:", min_value=10, max_value=25, value=15, step=5)
 
-        st.dataframe(
-            consistency_df,
-            column_config={
-                "bib_number": "Bib",
-                "rider_name": "Rider",
-                "team_name": "Team",
-                "country_code": "Nat",
-                "top10_finishes_count": st.column_config.NumberColumn("Top-10 Finishes Count", format="%d"),
-                "avg_rank_in_top10": st.column_config.NumberColumn("Avg Rank in Top 10", format="%.1f"),
-                "best_finish": st.column_config.NumberColumn("Best Finish", format="P%d")
-            },
-            hide_index=True,
-            use_container_width=True
+        consistency_df = olap.get_consistency_ranking(top_n_cons)
+        matrix_df = olap.get_top10_consistency_matrix(top_n_cons)
+
+        # Primary Visualization: Rider x Stage Heatmap
+        st.markdown(f"#### 🏁 Rider × Stage Consistency Heatmap (Top {top_n_cons} Consistent Riders across 21 Stages)")
+        st.caption("Numbers indicate top-10 finish ranks; colored tiles highlight wins, podiums, and top-ten presences.")
+
+        rect_e12 = alt.Chart(matrix_df).mark_rect(cornerRadius=2).encode(
+            x=alt.X("stage_id:O", title="Stage Number (1–21)"),
+            y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="top10_count", op="max", order="descending"), title="Contender"),
+            color=alt.Color("finish_category:N", scale=alt.Scale(
+                domain=["1st (Win)", "2nd-3rd (Podium)", "4th-10th (Top 10)", "> 10th", "DNS/DNF"],
+                range=["#eab308", "#3b82f6", "#10b981", "#f1f5f9", "#94a3b8"]
+            ), title="Stage Outcome"),
+            tooltip=[
+                alt.Tooltip("rider_name:N", title="Rider"),
+                alt.Tooltip("team_name:N", title="Team"),
+                alt.Tooltip("stage_id:O", title="Stage #"),
+                alt.Tooltip("stage_type:N", title="Terrain"),
+                alt.Tooltip("stage_rank:Q", title="Stage Rank"),
+                alt.Tooltip("finish_category:N", title="Category")
+            ]
+        ).properties(height=max(320, top_n_cons * 24))
+
+        # Text overlay showing stage rank for top-10 finishes
+        sub_top10 = matrix_df[matrix_df["stage_rank"] <= 10].copy()
+        sub_top10["stage_rank_int"] = sub_top10["stage_rank"].astype(int)
+        
+        text_e12 = alt.Chart(sub_top10).mark_text(fontSize=10, fontWeight="bold", color="white").encode(
+            x="stage_id:O",
+            y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="top10_count", op="max", order="descending")),
+            text=alt.Text("stage_rank_int:Q")
         )
+
+        st.altair_chart(rect_e12 + text_e12, use_container_width=True)
 
         st.markdown("---")
         st.markdown("#### 📋 Contributing Stages for Consistent Riders")
-        cons_dict = {f"Bib {r['bib_number']} - {r['rider_name']} ({r['team_name']})": r["bib_number"] for _, r in consistency_df.iterrows()}
-        sel_cons_rider = st.selectbox("Select Rider to View Contributing Stages:", options=list(cons_dict.keys()))
+        cons_dict = {f"Bib {r['bib_number']} - {r['rider_name']} ({r['team_name']}) — {r['top10_finishes_count']} top-10s": r["bib_number"] for _, r in consistency_df.iterrows()}
+        sel_cons_rider = st.selectbox("Select Rider to View Contributing Stages:", options=list(cons_dict.keys()), index=0)
         cons_bib = cons_dict[sel_cons_rider]
 
         contrib_df = olap.get_rider_contributing_stages(cons_bib)
@@ -1211,6 +2040,22 @@ elif menu == "🌍 Nations & Consistency (E8, E9, E12)":
             hide_index=True,
             use_container_width=True
         )
+
+        with st.expander("📋 View Full Consistency Ranking Summary Table"):
+            st.dataframe(
+                consistency_df,
+                column_config={
+                    "bib_number": "Bib",
+                    "rider_name": "Rider",
+                    "team_name": "Team",
+                    "country_code": "Nat",
+                    "top10_finishes_count": st.column_config.NumberColumn("Top-10 Finishes", format="%d"),
+                    "avg_rank_in_top10": st.column_config.NumberColumn("Avg Rank in Top 10", format="%.1f"),
+                    "best_finish": st.column_config.NumberColumn("Best Finish", format="P%d")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
 
 
 # =============================================================================
