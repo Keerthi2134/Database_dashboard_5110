@@ -50,7 +50,11 @@ The dashboard is structured into interactive modules addressing every analytical
 - **E2. A Stage in Focus:** Vignette view of any of the 21 stages (distance, start/finish locations, terrain profile) with leading finishers and a team perspective revealing which squads populated the top 10 on that day.
 - **E5. Mountain Contours:** Identifies elite climbers via two signals: podium frequency (top-3 finishes) on mountain stages and mean time gap to the stage winner, with instant drilldown to daily traces.
 - **E6. Speed Profiles as Simple Ratio:** Computes proxy speed ($\text{km/h} = \text{distance} / \text{time}$) across Flat, Hilly, Mountain, and ITT, highlighting riders and teams that retain speed when terrain shifts to mountains.
-- **E11. Against the Clock:** Compact catalogue of Individual Time Trial (ITT) stages (Stage 5 Caen and Stage 13 Loudenvielle $\rightarrow$ Peyragudes), date, distance, winner, speed, and podium leaderboards.
+- **E11. Against the Clock (ITT Catalogue & Visual Analysis):** Comprehensive Individual Time Trial module featuring:
+  - **Side-by-Side Comparison Cards:** Stage 5 (Caen Flat ITT, 33.0 km) vs. Stage 13 (Peyragudes Mountain ITT, 10.9 km) displaying stage metadata, terrain badges, winning times, and average speeds in clean metric cards.
+  - **Dedicated Leading Finishers Lollipop Charts:** Rendered directly beneath each stage card (`Caen → Caen` and `Loudenvielle → Peyragudes`), charting top finishers' adjusted time gaps to the winner, finish tier coloring, and precise speed annotations without text clutter.
+  - **Interactive Top-10 ITT Leaderboard & Squad Presence:** Stage selector toggling between Stage 5 and Stage 13 with dynamic time-gap profiles, squad top-10 concentration bars, and granular performance tables.
+  - **Dual-ITT Contender Comparison:** Grouped cross-stage bar chart analyzing contender speed differences between flat power courses and steep mountain summits.
 - **E15. The Long Day:** All 21 stages sorted by distance, spotlighting the longest route (Stage 2: 209.1 km, Lauwin-Planque $\rightarrow$ Boulogne-Sur-Mer), its endurance profile, and leading finishers.
 
 ### Module 3: Teams & Squad Dynamics
@@ -90,6 +94,12 @@ python subapp.py
 
 The application will open in your default web browser at `http://localhost:8501`.
 
+### 3. Run Automated Visualization & OLAP Tests
+To run the automated test suite that validates all 6 modules, all 15 requirements, and all 23 Altair charts:
+```bash
+python test_dashboard.py
+```
+
 ---
 
 ## 📁 Repository Structure
@@ -98,6 +108,7 @@ Database_dashboard_5110/
 ├── main.py                  # Main Streamlit Interactive Dashboard
 ├── olap.py                  # OLAP Analytical functions implementing E1 - E15
 ├── db.py                    # SQLite database connection & query helpers
+├── test_dashboard.py        # Automated test suite validating all charts and menus
 ├── build_database.py        # Automated ETL script creating tdf.db & data.sql
 ├── data.sql                 # Complete SQL DDL, view, and INSERT statements (459 KB)
 ├── tdf.db                   # SQLite database (8 tables, 1 view, 3,602 results)

@@ -1228,89 +1228,229 @@ elif menu == "🏔️ Stages & Terrain (E2, E5, E6, E11, E15)":
         # Category C Recommended Layout: Two Side-by-Side Comparison Cards
         col_itt1, col_itt2 = st.columns(2)
         
-        # Stage 5 Card
+        # Stage 5 Data
         stg5_info = itt_df[itt_df["stage_id"] == 5].iloc[0]
-        stg5_top3 = olap.get_stage_finishers(5, top_n=3)
+        df5 = olap.get_stage_finishers(5, top_n=6).copy()
+        df5["speed_kmh"] = (stg5_info["distance_km"] * 3600.0 / df5["finish_time"]).round(2)
+        df5["podium_cat"] = df5["rank"].apply(
+            lambda r: "Winner (1st)" if r == 1 else ("Podium (2nd-3rd)" if r <= 3 else "Top 6 (4th-6th)")
+        )
+        df5["label_text"] = df5.apply(
+            lambda r: f"Winner ({r['time_formatted']})" if r["rank"] == 1 else f"{r['gap_formatted']} ({r['speed_kmh']} km/h)",
+            axis=1
+        )
+        max_gap5 = max(float(df5["gap"].max()), 1.0)
+        x_domain_max5 = max_gap5 * 1.55 + 10
+
         with col_itt1:
             st.markdown(f"""
-            <div class="metric-card" style="border-top: 5px solid #4f46e5; height: 100%;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="metric-card" style="border-top: 5px solid #4f46e5; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                     <span class="stage-pill stage-itt">ITT STAGE 5</span>
-                    <span style="font-weight: 700; color: #4338ca;">{stg5_info['distance_km']} km (Flat ITT)</span>
+                    <span style="font-weight: 700; color: #4338ca; font-size: 0.95rem;">{stg5_info['distance_km']} km (Flat ITT)</span>
                 </div>
-                <h3 style="margin: 8px 0 2px 0; color: #1e1b4b;">{stg5_info['start_location']} → {stg5_info['finish_location']}</h3>
-                <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 12px;">Date: {stg5_info['stage_date']} | Flat rolling route through Normandy</div>
-                
-                <div style="background: #eef2ff; border-radius: 8px; padding: 12px; margin-bottom: 14px;">
-                    <div style="font-size: 0.8rem; font-weight: 700; color: #4338ca; text-transform: uppercase;">Stage Winner</div>
-                    <div style="font-size: 1.25rem; font-weight: 800; color: #0f172a;">{stg5_info['winner_name']}</div>
-                    <div style="font-size: 0.85rem; color: #475569;">{stg5_info['winner_team']}</div>
-                    <div style="font-size: 1.05rem; font-weight: 700; color: #3730a3; margin-top: 4px;">
-                        ⏱️ {stg5_info['winning_time_formatted']} ({stg5_info['winner_speed_kmh']} km/h)
+                <h3 style="margin: 4px 0 2px 0; color: #1e1b4b; font-size: 1.35rem;">{stg5_info['start_location']} → {stg5_info['finish_location']}</h3>
+                <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 8px;">
+                    📅 <strong>Date:</strong> {stg5_info['stage_date']} | Flat rolling power course through Normandy
+                </div>
+                <div style="background: #eef2ff; border-radius: 8px; padding: 10px 14px; border: 1px solid #c7d2fe;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-size: 0.72rem; font-weight: 700; color: #4338ca; text-transform: uppercase; letter-spacing: 0.5px;">Stage Winner</div>
+                            <div style="font-size: 1.15rem; font-weight: 800; color: #0f172a;">🥇 {stg5_info['winner_name']}</div>
+                            <div style="font-size: 0.82rem; color: #475569;">{stg5_info['winner_team']}</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 1.1rem; font-weight: 800; color: #3730a3;">⏱️ {stg5_info['winning_time_formatted']}</div>
+                            <div style="font-size: 0.85rem; font-weight: 600; color: #4338ca;">⚡ {stg5_info['winner_speed_kmh']} km/h</div>
+                        </div>
                     </div>
                 </div>
-                
-                <div style="font-size: 0.85rem; font-weight: 700; color: #334155; margin-bottom: 6px;">Podium Finishers:</div>
+            </div>
             """, unsafe_allow_html=True)
-            for _, r in stg5_top3.iterrows():
-                badge_emoji = "🥇" if r["rank"] == 1 else ("🥈" if r["rank"] == 2 else "🥉")
-                gap_lbl = "Winner" if r["rank"] == 1 else r["gap_formatted"]
-                st.markdown(f"• **{badge_emoji} P{r['rank']} {r['rider_name']}** ({r['team_name']}) — `{r['time_formatted']}` ({gap_lbl})")
             
-            # Mini horizontal gap bar
-            mini_stg5 = alt.Chart(stg5_top3).mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3, color="#6366f1").encode(
+            st.markdown("##### ⚡ Caen Top Finishers: Time Gap & Average Speed")
+            stem5 = alt.Chart(df5).mark_rule(color="#cbd5e1", strokeWidth=2).encode(
                 y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending"), title=None),
-                x=alt.X("gap:Q", title="Gap to Winner (s)"),
-                tooltip=["rank:Q", "rider_name:N", "time_formatted:N", "gap_formatted:N"]
-            ).properties(height=110)
-            st.altair_chart(mini_stg5, use_container_width=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+                x=alt.X("gap:Q", title="Adjusted Time Gap to Winner (Seconds)", scale=alt.Scale(domain=[0, x_domain_max5])),
+                x2=alt.value(0)
+            )
+            dot5 = alt.Chart(df5).mark_circle(size=140).encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending")),
+                x=alt.X("gap:Q"),
+                color=alt.Color("podium_cat:N", scale=alt.Scale(
+                    domain=["Winner (1st)", "Podium (2nd-3rd)", "Top 6 (4th-6th)"],
+                    range=["#eab308", "#4f46e5", "#64748b"]
+                ), legend=None),
+                tooltip=[
+                    alt.Tooltip("rank:Q", title="Rank"),
+                    alt.Tooltip("rider_name:N", title="Rider"),
+                    alt.Tooltip("team_name:N", title="Team"),
+                    alt.Tooltip("time_formatted:N", title="Adjusted Time"),
+                    alt.Tooltip("gap_formatted:N", title="Gap to Winner"),
+                    alt.Tooltip("speed_kmh:Q", title="Avg Speed (km/h)")
+                ]
+            )
+            txt5 = alt.Chart(df5).mark_text(align="left", baseline="middle", dx=8, fontSize=11, color="#334155").encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending")),
+                x=alt.X("gap:Q"),
+                text=alt.Text("label_text:N")
+            )
+            chart_stg5 = (stem5 + dot5 + txt5).properties(height=240)
+            st.altair_chart(chart_stg5, use_container_width=True)
 
-        # Stage 13 Card
+        # Stage 13 Data
         stg13_info = itt_df[itt_df["stage_id"] == 13].iloc[0]
-        stg13_top3 = olap.get_stage_finishers(13, top_n=3)
+        df13 = olap.get_stage_finishers(13, top_n=6).copy()
+        df13["speed_kmh"] = (stg13_info["distance_km"] * 3600.0 / df13["finish_time"]).round(2)
+        df13["podium_cat"] = df13["rank"].apply(
+            lambda r: "Winner (1st)" if r == 1 else ("Podium (2nd-3rd)" if r <= 3 else "Top 6 (4th-6th)")
+        )
+        df13["label_text"] = df13.apply(
+            lambda r: f"Winner ({r['time_formatted']})" if r["rank"] == 1 else f"{r['gap_formatted']} ({r['speed_kmh']} km/h)",
+            axis=1
+        )
+        max_gap13 = max(float(df13["gap"].max()), 1.0)
+        x_domain_max13 = max_gap13 * 1.55 + 10
+
         with col_itt2:
             st.markdown(f"""
-            <div class="metric-card" style="border-top: 5px solid #ef4444; height: 100%;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="metric-card" style="border-top: 5px solid #ef4444; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                     <span class="stage-pill stage-mountain">ITT STAGE 13</span>
-                    <span style="font-weight: 700; color: #b91c1c;">{stg13_info['distance_km']} km (Mountain ITT)</span>
+                    <span style="font-weight: 700; color: #b91c1c; font-size: 0.95rem;">{stg13_info['distance_km']} km (Mountain ITT)</span>
                 </div>
-                <h3 style="margin: 8px 0 2px 0; color: #7f1d1d;">{stg13_info['start_location']} → {stg13_info['finish_location']}</h3>
-                <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 12px;">Date: {stg13_info['stage_date']} | Steep Pyrenean mountain time-trial</div>
-                
-                <div style="background: #fef2f2; border-radius: 8px; padding: 12px; margin-bottom: 14px;">
-                    <div style="font-size: 0.8rem; font-weight: 700; color: #b91c1c; text-transform: uppercase;">Stage Winner</div>
-                    <div style="font-size: 1.25rem; font-weight: 800; color: #0f172a;">{stg13_info['winner_name']}</div>
-                    <div style="font-size: 0.85rem; color: #475569;">{stg13_info['winner_team']}</div>
-                    <div style="font-size: 1.05rem; font-weight: 700; color: #991b1b; margin-top: 4px;">
-                        ⏱️ {stg13_info['winning_time_formatted']} ({stg13_info['winner_speed_kmh']} km/h)
+                <h3 style="margin: 4px 0 2px 0; color: #7f1d1d; font-size: 1.35rem;">{stg13_info['start_location']} → {stg13_info['finish_location']}</h3>
+                <div style="font-size: 0.85rem; color: #64748b; margin-bottom: 8px;">
+                    📅 <strong>Date:</strong> {stg13_info['stage_date']} | Steep Pyrenean mountain time-trial (8% finish)
+                </div>
+                <div style="background: #fef2f2; border-radius: 8px; padding: 10px 14px; border: 1px solid #fecaca;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-size: 0.72rem; font-weight: 700; color: #b91c1c; text-transform: uppercase; letter-spacing: 0.5px;">Stage Winner</div>
+                            <div style="font-size: 1.15rem; font-weight: 800; color: #0f172a;">🥇 {stg13_info['winner_name']}</div>
+                            <div style="font-size: 0.82rem; color: #475569;">{stg13_info['winner_team']}</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 1.1rem; font-weight: 800; color: #991b1b;">⏱️ {stg13_info['winning_time_formatted']}</div>
+                            <div style="font-size: 0.85rem; font-weight: 600; color: #b91c1c;">⚡ {stg13_info['winner_speed_kmh']} km/h</div>
+                        </div>
                     </div>
                 </div>
-                
-                <div style="font-size: 0.85rem; font-weight: 700; color: #334155; margin-bottom: 6px;">Podium Finishers:</div>
+            </div>
             """, unsafe_allow_html=True)
-            for _, r in stg13_top3.iterrows():
-                badge_emoji = "🥇" if r["rank"] == 1 else ("🥈" if r["rank"] == 2 else "🥉")
-                gap_lbl = "Winner" if r["rank"] == 1 else r["gap_formatted"]
-                st.markdown(f"• **{badge_emoji} P{r['rank']} {r['rider_name']}** ({r['team_name']}) — `{r['time_formatted']}` ({gap_lbl})")
             
-            # Mini horizontal gap bar
-            mini_stg13 = alt.Chart(stg13_top3).mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3, color="#ef4444").encode(
+            st.markdown("##### ⚡ Peyragudes Top Finishers: Time Gap & Average Speed")
+            stem13 = alt.Chart(df13).mark_rule(color="#cbd5e1", strokeWidth=2).encode(
                 y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending"), title=None),
-                x=alt.X("gap:Q", title="Gap to Winner (s)"),
-                tooltip=["rank:Q", "rider_name:N", "time_formatted:N", "gap_formatted:N"]
-            ).properties(height=110)
-            st.altair_chart(mini_stg13, use_container_width=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+                x=alt.X("gap:Q", title="Adjusted Time Gap to Winner (Seconds)", scale=alt.Scale(domain=[0, x_domain_max13])),
+                x2=alt.value(0)
+            )
+            dot13 = alt.Chart(df13).mark_circle(size=140).encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending")),
+                x=alt.X("gap:Q"),
+                color=alt.Color("podium_cat:N", scale=alt.Scale(
+                    domain=["Winner (1st)", "Podium (2nd-3rd)", "Top 6 (4th-6th)"],
+                    range=["#eab308", "#ef4444", "#64748b"]
+                ), legend=None),
+                tooltip=[
+                    alt.Tooltip("rank:Q", title="Rank"),
+                    alt.Tooltip("rider_name:N", title="Rider"),
+                    alt.Tooltip("team_name:N", title="Team"),
+                    alt.Tooltip("time_formatted:N", title="Adjusted Time"),
+                    alt.Tooltip("gap_formatted:N", title="Gap to Winner"),
+                    alt.Tooltip("speed_kmh:Q", title="Avg Speed (km/h)")
+                ]
+            )
+            txt13 = alt.Chart(df13).mark_text(align="left", baseline="middle", dx=8, fontSize=11, color="#334155").encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending")),
+                x=alt.X("gap:Q"),
+                text=alt.Text("label_text:N")
+            )
+            chart_stg13 = (stem13 + dot13 + txt13).properties(height=240)
+            st.altair_chart(chart_stg13, use_container_width=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        # Compact Detail Table
-        st.markdown("#### 📋 Detailed ITT Stage Leaderboards")
-        itt_sel = st.radio("Select Stage for Full Top 10 Finishes:", [5, 13], format_func=lambda s: f"Stage {s} ({'Caen Flat ITT' if s == 5 else 'Peyragudes Mountain ITT'})", horizontal=True)
-        itt_finishers = olap.get_stage_finishers(itt_sel, top_n=10)
+        st.markdown("---")
+        # Detailed Leaderboards & Interactive Charts
+        st.markdown("### ⏱️ Detailed ITT Stage Analysis & Leaderboards")
+        itt_sel = st.radio(
+            "Select Stage for Detailed Top 10 Analysis & Visual Gap Profile:",
+            [5, 13],
+            format_func=lambda s: f"Stage {s} ({'Caen Flat ITT — 33.0 km' if s == 5 else 'Peyragudes Mountain ITT — 10.9 km'})",
+            horizontal=True
+        )
+
+        itt_finishers = olap.get_stage_finishers(itt_sel, top_n=10).copy()
+        itt_dist = 33.0 if itt_sel == 5 else 10.9
+        itt_finishers["speed_kmh"] = (itt_dist * 3600.0 / itt_finishers["finish_time"]).round(2)
+        itt_finishers["podium_cat"] = itt_finishers["rank"].apply(
+            lambda r: "Winner (1st)" if r == 1 else ("Podium (2nd-3rd)" if r <= 3 else "Top 10 (4th-10th)")
+        )
+        itt_finishers["display_gap"] = itt_finishers.apply(
+            lambda r: f"Winner ({r['time_formatted']})" if r["rank"] == 1 else f"{r['gap_formatted']} ({r['speed_kmh']} km/h)",
+            axis=1
+        )
+
+        itt_team_persp = olap.get_stage_team_perspective(itt_sel, top_n=10)
+
+        # Side-by-side Top-10 Lollipop Gap Chart and Squad Presence Chart
+        col_itt_ch1, col_itt_ch2 = st.columns([3, 2])
+        with col_itt_ch1:
+            st.markdown(f"#### 🍭 Stage {itt_sel} Top-10 Finishers: Adjusted Time Gap to Winner")
+            stem_itt = alt.Chart(itt_finishers).mark_rule(color="#cbd5e1", strokeWidth=2).encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending"), title="Finish Position"),
+                x=alt.X("gap:Q", title="Adjusted Time Gap to Winner (Seconds)"),
+                x2=alt.value(0)
+            )
+            dot_itt = alt.Chart(itt_finishers).mark_circle(size=140).encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending")),
+                x=alt.X("gap:Q"),
+                color=alt.Color("podium_cat:N", scale=alt.Scale(
+                    domain=["Winner (1st)", "Podium (2nd-3rd)", "Top 10 (4th-10th)"],
+                    range=["#eab308", "#2563eb", "#64748b"]
+                ), title="Finish Position", legend=None),
+                tooltip=[
+                    alt.Tooltip("rank:Q", title="Finish Rank"),
+                    alt.Tooltip("rider_name:N", title="Rider"),
+                    alt.Tooltip("team_name:N", title="Team"),
+                    alt.Tooltip("country_code:N", title="Nat"),
+                    alt.Tooltip("time_formatted:N", title="Adjusted Time"),
+                    alt.Tooltip("gap_formatted:N", title="Gap to Winner"),
+                    alt.Tooltip("speed_kmh:Q", title="Average Speed (km/h)")
+                ]
+            )
+            label_itt = alt.Chart(itt_finishers).mark_text(
+                align="left", baseline="middle", dx=7, fontSize=11, color="#334155"
+            ).encode(
+                y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="rank", order="ascending")),
+                x=alt.X("gap:Q"),
+                text=alt.Text("display_gap:N")
+            )
+            st.altair_chart((stem_itt + dot_itt + label_itt).properties(height=320), use_container_width=True)
+
+        with col_itt_ch2:
+            st.markdown(f"#### 👥 Squad Representation in Stage {itt_sel} Top 10")
+            bar_itt_team = alt.Chart(itt_team_persp).mark_bar(
+                cornerRadiusTopRight=4, cornerRadiusBottomRight=4,
+                color="#4f46e5" if itt_sel == 5 else "#ef4444"
+            ).encode(
+                x=alt.X("top_finishers_count:Q", title="Count of Riders in Top 10", axis=alt.Axis(tickMinStep=1)),
+                y=alt.Y("team_name:N", sort="-x", title="Team"),
+                tooltip=[
+                    alt.Tooltip("team_name:N", title="Team"),
+                    alt.Tooltip("top_finishers_count:Q", title="Top 10 Riders"),
+                    alt.Tooltip("riders_in_top_n:N", title="Finishers")
+                ]
+            ).properties(height=320)
+            st.altair_chart(bar_itt_team, use_container_width=True)
+
+        # Detail Data Table
+        st.markdown(f"#### 📋 Stage {itt_sel} Full Leaderboard & Performance Metrics")
         st.dataframe(
-            itt_finishers[["rank", "bib_number", "rider_name", "team_name", "country_code", "time_formatted", "gap_formatted"]],
+            itt_finishers[[
+                "rank", "bib_number", "rider_name", "team_name", "country_code",
+                "time_formatted", "gap_formatted", "speed_kmh"
+            ]],
             column_config={
                 "rank": st.column_config.NumberColumn("Rank", format="P%d"),
                 "bib_number": "Bib",
@@ -1318,11 +1458,56 @@ elif menu == "🏔️ Stages & Terrain (E2, E5, E6, E11, E15)":
                 "team_name": "Team",
                 "country_code": "Nat",
                 "time_formatted": "Adjusted Time",
-                "gap_formatted": "Gap to Winner"
+                "gap_formatted": "Gap to Winner",
+                "speed_kmh": st.column_config.NumberColumn("Avg Speed", format="%.2f km/h")
             },
             hide_index=True,
             use_container_width=True
         )
+
+        with st.expander("⚡ Dual-ITT Head-to-Head Comparison: Flat vs Mountain Contender Speeds"):
+            st.markdown("""
+            Compare how top time-trialists and GC contenders performed across the contrasting flat power terrain 
+            of Stage 5 (Caen) versus the steep mountain ascent of Stage 13 (Peyragudes).
+            """)
+            q_dual = """
+            SELECT 
+                r.bib_number,
+                rd.rider_name,
+                rd.team_name,
+                s.stage_id,
+                CASE WHEN s.stage_id = 5 THEN 'Stage 5 (Flat ITT, 33.0 km)' ELSE 'Stage 13 (Mountain ITT, 10.9 km)' END AS stage_label,
+                r.rank,
+                r.adj_time,
+                ROUND(s.distance_km * 3600.0 / r.finish_time, 2) AS speed_kmh
+            FROM result_with_adj_time r
+            JOIN rider rd ON r.bib_number = rd.bib_number
+            JOIN stage s ON r.stage_id = s.stage_id
+            WHERE s.stage_type = 'individual time-trial'
+            AND r.bib_number IN (
+                SELECT bib_number FROM result_with_adj_time WHERE stage_id IN (5, 13) AND rank <= 8
+            )
+            ORDER BY r.bib_number, s.stage_id;
+            """
+            df_dual = execute_query(q_dual)
+            if not df_dual.empty:
+                dual_chart = alt.Chart(df_dual).mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3).encode(
+                    y=alt.Y("rider_name:N", sort=alt.EncodingSortField(field="speed_kmh", op="max", order="descending"), title="Rider"),
+                    x=alt.X("speed_kmh:Q", title="Average Speed (km/h)"),
+                    color=alt.Color("stage_label:N", scale=alt.Scale(
+                        domain=["Stage 5 (Flat ITT, 33.0 km)", "Stage 13 (Mountain ITT, 10.9 km)"],
+                        range=["#6366f1", "#ef4444"]
+                    ), title="Time Trial Stage"),
+                    yOffset="stage_label:N",
+                    tooltip=[
+                        alt.Tooltip("rider_name:N", title="Rider"),
+                        alt.Tooltip("team_name:N", title="Team"),
+                        alt.Tooltip("stage_label:N", title="Stage"),
+                        alt.Tooltip("rank:Q", title="Finish Rank"),
+                        alt.Tooltip("speed_kmh:Q", title="Speed (km/h)")
+                    ]
+                ).properties(height=340)
+                st.altair_chart(dual_chart, use_container_width=True)
 
     # -------------------------------------------------------------------------
     # TAB 5: E15 (Category B: Hybrid Chart + Table)
